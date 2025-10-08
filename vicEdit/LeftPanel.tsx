@@ -11,6 +11,7 @@ interface LeftPanelProps {
     projectData: DesignProject;
     addLayer: (layer: AllLayer) => void;
     updateProjectData: (updater: (prev: DesignProject) => DesignProject) => void;
+    onDeleteAsset: (assetId: string) => void;
     allLayers: AllLayer[];
     selectedLayerIds: string[];
     setSelectedLayerIds: (ids: string[] | ((prev: string[]) => string[])) => void;
@@ -25,7 +26,7 @@ interface LeftPanelProps {
 
 export const LeftPanel: React.FC<LeftPanelProps> = (props) => {
     const { 
-        projectData, addLayer, updateProjectData, allLayers, selectedLayerIds, 
+        projectData, addLayer, updateProjectData, onDeleteAsset, allLayers, selectedLayerIds, 
         setSelectedLayerIds, handleLayerUpdate, forceAiAssistant, onAiAssistantClose,
         editingDocumentId, onStartGeneration, onOpenDataDrivenModal, onStartWizard
     } = props;
@@ -83,6 +84,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = (props) => {
                         projectData={projectData}
                         addLayer={addLayer}
                         updateProjectData={updateProjectData}
+                        onDeleteAsset={onDeleteAsset}
                     />
                 )}
                  {activeTab === 'layers' && (

@@ -160,7 +160,14 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
     const handlePartyChange = (e: ChangeEvent<HTMLSelectElement>) => {
         const partyName = e.target.value;
         const partyBrand = PARTY_BRANDING[partyName];
+        
+        const hasCustomSettings = projectData.brandKit.colors.length > 0 || projectData.brandKit.logos.some(logo => !logo.assetId.startsWith('svg:'));
+        
         if (partyBrand) {
+            if (hasCustomSettings && !window.confirm("정당을 선택하면 현재 설정된 브랜드 색상과 로고가 모두 교체됩니다. 계속하시겠습니까?")) {
+                e.target.value = selectedPartyName; // Revert selection
+                return;
+            }
             const newBrandColors: BrandColor[] = Object.values(partyBrand.colors).map((colorValue, index) => ({
                 id: uuidv4(),
                 role: index === 0 ? 'Main' : 'Accent',

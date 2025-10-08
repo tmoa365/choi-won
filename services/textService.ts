@@ -56,9 +56,17 @@ export const generateDesignCopy = async (designBrief: DesignBrief): Promise<{ bo
         });
 
         const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
+        try {
+            return JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("JSON parsing error in generateDesignCopy. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error generating design copy:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to generate AI copy. The model may have returned an invalid format.");
     }
 };
@@ -92,37 +100,54 @@ const BRIEF_EXPANSION_SCHEMA = {
 };
 
 
-export const expandBriefFromIdea = async (idea: string, designType: DesignType, context: Record<string, string> = {}): Promise<DesignBrief> => {
+export const expandBriefFromIdea = async (
+    idea: string, 
+    designType: DesignType, 
+    imageBase64?: string,
+    mimeType?: string
+): Promise<DesignBrief> => {
     
-    const contextString = Object.entries(context).filter(([, value]) => value).map(([key, value]) => `- ${key}: ${value}`).join('\n');
+    const imageInstruction = imageBase64 
+        ? `**Reference Image:** An image is provided to show the desired visual style. You MUST analyze it to inform your choices.`
+        : `**Reference Image:** No image provided. Make creative choices based on the text alone.`;
 
     const prompt = `
-        You are an expert Creative Director. A user has provided a simple idea for a specific design type and some context. Your task is to expand this into a complete, professional design brief.
+        You are an expert Creative Director. A user has provided a simple idea for a specific design type, and optionally a reference image. Your task is to expand this into a complete, professional design brief by analyzing both inputs.
 
-        **User's Idea:** "${idea}"
+        **User's Idea (Text):** "${idea}"
         **Design Type:** "${designType}"
-        **User-provided Information:**
-        ${contextString || "No specific information provided yet."}
+        ${imageInstruction}
 
-        **Available Options for your response:**
+        **Available Options for your response (You MUST choose from these lists):**
         - **Keywords:** ${DESIGN_KEYWORDS.join(', ')}
         - **Color Palettes:** ${Object.keys(getAvailableColorPalettes()).join(', ')}
         - **Tone & Manner:** ${Object.keys(TONE_AND_MANNERS).join(', ')}
         - **Font Families:** ${KOREAN_FONTS_LIST.map(f => f.name).join(', ')}
 
         **Instructions:**
-        1.  Analyze the user's idea, design type, and provided information to understand the subject, purpose, and audience.
-        2.  Create a compelling **title** and **subtitle**. These MUST incorporate the user's information. For example, if the design type is a business card and the user provided a name and title, use those.
-        3.  Write a concise and effective **bodyText** and **contactInfo**, using the user's information and adding logical placeholders where needed. Use '\\n' for line breaks.
-        4.  Select exactly 3 of the most relevant **keywords** from the list.
-        5.  Select the most fitting **colorPalette**, **toneAndManner**, and **fontFamily** from the provided lists.
-        6.  Your response MUST be a single JSON object that strictly conforms to the provided schema. Do not include any other text, markdown, or explanations.
+        1.  **Analyze the Text:** Extract key information from the user's idea: product/event name, purpose, dates, locations, special offers, etc.
+        2.  **Analyze the Image (if provided):**
+            -   **Visual Style:** Is it modern, minimalist, retro, elegant? This informs your choice of 'keywords' and 'toneAndManner'.
+            -   **Color Palette:** Identify the dominant colors. Choose the CLOSEST matching palette from the 'Color Palettes' list.
+            -   **Typography:** What is the feeling of the fonts used (e.g., bold sans-serif, delicate serif, handwritten)? Choose the BEST matching font from the 'Font Families' list for the main headline.
+        3.  **Synthesize and Generate:** Combine your analysis of both text and image to create the final brief.
+            -   Create a compelling **title** and **subtitle** using the extracted information.
+            -   Write a concise and effective **bodyText** and **contactInfo**, using extracted details and adding logical placeholders (e.g., '연락처', '웹사이트') where needed. Use '\\n' for line breaks.
+            -   If the user's text implies a coupon (e.g., "쿠폰을 추가해줘"), add a coupon section to the bodyText like "\\n\\n[하단 쿠폰 영역]\\n- 아메리카노 1잔 무료\\n- 사용기한: ~12/31".
+            -   Select exactly 3 of the most relevant **keywords**.
+            -   Select the most fitting **colorPalette**, **toneAndManner**, and **fontFamily**.
+        4.  **Output Format:** Your response MUST be a single JSON object that strictly conforms to the provided schema. Do not include any other text, markdown, or explanations.
     `;
+
+    const parts: any[] = [{ text: prompt }];
+    if (imageBase64 && mimeType) {
+        parts.push({ inlineData: { data: imageBase64, mimeType } });
+    }
 
      try {
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: prompt,
+            contents: { parts },
             config: {
                 responseMimeType: "application/json",
                 responseSchema: BRIEF_EXPANSION_SCHEMA,
@@ -130,9 +155,17 @@ export const expandBriefFromIdea = async (idea: string, designType: DesignType, 
         });
 
         const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
+        try {
+            return JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("JSON parsing error in expandBriefFromIdea. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error expanding brief from idea:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to generate AI brief. The model may have returned an invalid format.");
     }
 };
@@ -191,9 +224,17 @@ export const generateDesignConcepts = async (idea: string): Promise<DesignConcep
         });
 
         const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
+        try {
+            return JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("JSON parsing error in generateDesignConcepts. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error generating design concepts:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to generate AI concepts. The model may have returned an invalid format.");
     }
 };
@@ -263,9 +304,17 @@ export const suggestFont = async (
         });
 
         const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
+        try {
+            return JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("JSON parsing error in suggestFont. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error suggesting font:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to suggest font.");
     }
 };
@@ -307,10 +356,18 @@ export const refineTextContent = async (textToRefine: string, instruction: strin
         });
 
         const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        return result.refinedText || textToRefine;
+        try {
+            const result = JSON.parse(jsonString);
+            return result.refinedText || textToRefine;
+        } catch (parseError) {
+            console.error("JSON parsing error in refineTextContent. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error refining text content:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to refine text content.");
     }
 };

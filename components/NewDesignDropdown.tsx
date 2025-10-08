@@ -7,9 +7,10 @@ import { CustomSizeModal } from './CustomSizeModal';
 interface NewDesignDropdownProps {
     onCreateNewDesign: (type: DesignType, dimensions?: { width_mm: number, height_mm: number }) => void;
     onStartWizardWithType: (type: GenerationOption) => void;
+    onStartSeasonalWizard: () => void;
 }
 
-export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNewDesign, onStartWizardWithType }) => {
+export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNewDesign, onStartWizardWithType, onStartSeasonalWizard }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -19,7 +20,9 @@ export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNe
             group: '홍보/이벤트',
             options: [
                 { label: '포스터', type: DesignType.Poster },
-                { label: '현수막/플래카드', type: DesignType.Banner },
+                { label: '대형 현수막 (600x90cm)', type: DesignType.Banner },
+                { label: '와이드 현수막 (600x30cm)', type: DesignType.WideBanner },
+                { label: 'X배너 (60x180cm)', type: DesignType.XBanner },
                 { label: '전단지', type: DesignType.Flyer },
                 { label: '리플렛/팜플렛', type: DesignType.Leaflet },
                 { label: '안내 책자', type: DesignType.Booklet },
@@ -84,7 +87,11 @@ export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNe
     }, []);
 
     const handleSelect = (type: GenerationOption) => {
-        onStartWizardWithType(type);
+        if (type === DesignType.SeasonalGreeting) {
+            onStartSeasonalWizard();
+        } else {
+            onStartWizardWithType(type);
+        }
         setIsOpen(false);
     };
 

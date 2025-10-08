@@ -2,7 +2,7 @@ import React, { useState, ChangeEvent, DragEvent } from 'react';
 import { DesignProject, TextLayer, ImageLayer, ShapeLayer, ImageAsset, AllLayer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { Button, Input } from '../components/ui';
-import { SquareIcon, CircleIcon, LineIcon, SpinnerIcon, SearchIcon } from '../components/icons';
+import { SquareIcon, CircleIcon, LineIcon, SpinnerIcon, SearchIcon, TrashIcon } from '../components/icons';
 import { ptToPx, dataURLtoFile, getApiErrorMessage } from './utils';
 import { generateDesignElement, searchImages } from '../services';
 import { AIPhotoEditorModal } from '../components/AIPhotoEditorModal';
@@ -11,12 +11,12 @@ interface AssetPanelProps {
     projectData: DesignProject;
     addLayer: (layer: AllLayer) => void;
     updateProjectData: (updater: (prev: DesignProject) => DesignProject) => void;
+    onDeleteAsset: (assetId: string) => void;
 }
 
-export const AssetPanel: React.FC<AssetPanelProps> = ({ projectData, addLayer, updateProjectData }) => {
+export const AssetPanel: React.FC<AssetPanelProps> = ({ projectData, addLayer, updateProjectData, onDeleteAsset }) => {
     const [elementPrompt, setElementPrompt] = useState('');
     const [isGeneratingElement, setIsGeneratingElement] = useState(false);
-    const [isDragging, setIsDragging] = useState(false);
     const [activeImageTab, setActiveImageTab] = useState<'my-images' | 'ai-search'>('my-images');
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
@@ -95,33 +95,32 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ projectData, addLayer, u
         addLayer(newImage);
     };
     
-    const processFiles = async (files: FileList) => {
-        const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-        if (imageFiles.length > 0) {
-            const newAssetsPromises: Promise<ImageAsset>[] = imageFiles.map(async file => {
-                const previewUrl = URL.createObjectURL(file);
-                const image = new Image();
-                image.src = previewUrl;
-                await new Promise((resolve, reject) => {
-                    image.onload = resolve;
-                    image.onerror = reject;
-                });
-                return {
-                    id: uuidv4(),
-                    file,
-                    previewUrl,
-                    width: image.naturalWidth,
-                    height: image.naturalHeight,
-                };
-            });
-            const newAssets = await Promise.all(newAssetsPromises);
-            updateProjectData(p => ({...p, imageLibrary: [...p.imageLibrary, ...newAssets]}));
+    // The `processFiles` function is now handled globally in App.tsx via drag-and-drop or paste.
+    // This input remains for explicit uploads.
+    const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => { 
+        if (e.target.files) {
+            // This is a workaround since AssetPanel doesn't have access to the global `processFiles`.
+            // The global drag-drop/paste is now the primary way. This input acts as a secondary method.
+            const processLocalFiles = async (files: FileList) => {
+                 const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+                if (imageFiles.length > 0) {
+                    const newAssetsPromises: Promise<ImageAsset>[] = imageFiles.map(async file => {
+                        const previewUrl = URL.createObjectURL(file);
+                        const image = new Image();
+                        image.src = previewUrl;
+                        await new Promise((resolve, reject) => {
+                            image.onload = resolve;
+                            image.onerror = reject;
+                        });
+                        return { id: uuidv4(), file, previewUrl, width: image.naturalWidth, height: image.naturalHeight };
+                    });
+                    const newAssets = await Promise.all(newAssetsPromises);
+                    updateProjectData(p => ({...p, imageLibrary: [...p.imageLibrary, ...newAssets]}));
+                }
+            };
+            processLocalFiles(e.target.files);
         }
     };
-    const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) processFiles(e.target.files); };
-    const handleDragOver = (e: DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
-    const handleDragLeave = (e: DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
-    const handleDrop = (e: DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) processFiles(e.dataTransfer.files); };
 
     const handleSearchImages = async () => {
         if (!searchQuery.trim()) return; setIsSearching(true); setSearchedImages([]);
@@ -193,8 +192,8 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ projectData, addLayer, u
 
                 {activeImageTab === 'my-images' && (
                     <>
-                        <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} className={`p-2 border-2 border-dashed border-slate-300 rounded-lg text-center transition-colors ${isDragging ? 'bg-indigo-100 border-indigo-400' : ''}`}>
-                            <label htmlFor="file-upload-asset" className="relative cursor-pointer rounded-md text-xs font-medium text-indigo-600 hover:text-indigo-500"><span>업로드</span><input id="file-upload-asset" name="file-upload" type="file" className="sr-only" multiple accept="image/png, image/jpeg" onChange={handleFileChange} /></label>
+                        <div className="p-2 border-2 border-dashed border-slate-300 rounded-lg text-center transition-colors">
+                            <label htmlFor="file-upload-asset" className="relative cursor-pointer rounded-md text-xs font-medium text-indigo-600 hover:text-indigo-500"><span>업로드</span><input id="file-upload-asset" name="file-upload" type="file" className="sr-only" multiple accept="image/png, image/jpeg, image/svg+xml, application/pdf" onChange={handleFileChange} /></label>
                             <p className="text-xs text-slate-500">또는 드래그</p>
                         </div>
                         {projectData.imageLibrary.length > 0 ? (
@@ -203,12 +202,21 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ projectData, addLayer, u
                                     const primaryLogo = projectData.brandKit.logos.find(logo => logo.role === 'Primary Signature');
                                     const isPrimaryLogo = primaryLogo?.assetId === asset.id;
                                     return (
-                                    <div key={asset.id} className="relative group aspect-square cursor-pointer" onClick={() => addImage(asset.id)}>
-                                        <img src={asset.previewUrl} alt={asset.file.name} className={`w-full h-full object-cover rounded-md border-2 ${isPrimaryLogo ? 'border-indigo-600' : 'border-transparent'}`} />
-                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-1 space-y-1">
-                                            <span className="text-white text-xs text-center">캔버스에 추가</span>
-                                            <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); setEditingAsset(asset); }}>AI 편집</Button>
+                                    <div key={asset.id} className="relative group aspect-square">
+                                        <div className="absolute inset-0 cursor-pointer" onClick={() => addImage(asset.id)}>
+                                            <img src={asset.previewUrl} alt={asset.file.name} className={`w-full h-full object-cover rounded-md border-2 ${isPrimaryLogo ? 'border-indigo-600' : 'border-transparent'}`} />
+                                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-1 space-y-1">
+                                                <span className="text-white text-xs text-center">캔버스에 추가</span>
+                                                <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); setEditingAsset(asset); }}>AI 편집</Button>
+                                            </div>
                                         </div>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); onDeleteAsset(asset.id); }}
+                                            className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 hover:bg-red-700 z-10"
+                                            title="이미지 삭제"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
+                                        </button>
                                     </div>
                                 )})}
                             </div>

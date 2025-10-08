@@ -1,3 +1,7 @@
+/**
+ * @deprecated This file is no longer used and can be safely deleted.
+ * Its functionality has been moved or integrated elsewhere.
+ */
 import React from 'react';
 
 /**

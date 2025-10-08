@@ -1,10 +1,11 @@
 export enum DesignType {
+  AutoDetect = 'AI 자동 감지',
   Poster = '포스터',
   Booklet = '안내 책자',
   CardNews = 'SNS 카드뉴스',
   BusinessCardFront = '명함 (앞면)',
   BusinessCardBack = '명함 (뒷면)',
-  Banner = '현수막',
+  Banner = '대형 현수막',
   Flyer = '전단지',
   Placard = '플래카드',
   VColoring = 'V컬러링',
@@ -30,6 +31,9 @@ export enum DesignType {
   // Stage 3 Additions
   ProductBox = '제품 단상자',
   WindowSheeting = '윈도우 시트지',
+  // New Banner types
+  WideBanner = '와이드형 현수막',
+  XBanner = 'X배너',
 }
 
 export type GenerationOption = DesignType | 'BusinessCardSet';
@@ -105,7 +109,7 @@ export interface ImageLayer {
   groupId?: string;
 }
 
-export type GradientStop = { offset: number; color: string; };
+export type GradientStop = { id: string; offset: number; color: string; };
 export type Gradient = { type: 'linear'; angle: number; stops: GradientStop[]; };
 export type Fill = string | Gradient;
 

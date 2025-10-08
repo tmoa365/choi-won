@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { DesignPage, TextEffect, TextEffectType, Gradient, AllLayer } from '../types';
+import { DesignPage, TextEffect, TextEffectType, Gradient, AllLayer, DesignType } from '../types';
 import { Input, Button, Label, Select, Textarea } from '../components/ui';
 import {
     SpinnerIcon, BringForwardIcon, SendBackwardIcon,
@@ -7,12 +7,13 @@ import {
     ObjectAlignLeftIcon, ObjectAlignCenterIcon, ObjectAlignRightIcon,
     ObjectAlignTopIcon, ObjectAlignMiddleIcon, ObjectAlignBottomIcon, SparklesIcon,
     TypeIcon, RotateIcon, GroupIcon, XCircleIcon, PlusIcon, EffectsIcon, ChevronDownIcon, MagicWandIcon,
-    TrashIcon
+    TrashIcon, ExclamationTriangleIcon
 } from '../components/icons';
 import { KOREAN_FONTS_LIST } from '../components/fonts';
-import { getEffectStyles, colorTo1x1PngDataURL, getFillStyle } from './utils';
+import { getEffectStyles, colorTo1x1PngDataURL, getFillStyle, getBase64FromDataUrl } from './utils';
 import { ColorPicker } from '../components/ColorPicker';
 import { AiAction } from '../components/AiAssistantModal';
+import { v4 as uuidv4 } from 'uuid';
 
 type SelectedLayer = AllLayer;
 
@@ -46,11 +47,11 @@ const defaultEffects: { [K in TextEffectType]: Extract<TextEffect, {type: K}> } 
 
 const InspectorAccordion: React.FC<{ title: string; children: React.ReactNode; isOpen: boolean; onToggle: () => void; }> = ({ title, children, isOpen, onToggle }) => (
     <div className="border-b border-slate-200">
-        <button onClick={onToggle} className="flex justify-between items-center w-full py-4 px-2 text-left">
+        <button onClick={onToggle} className="flex justify-between items-center w-full p-4 text-left">
             <span className="font-semibold text-slate-600 text-xs uppercase tracking-wider">{title}</span>
             <ChevronDownIcon className={`w-5 h-5 text-slate-500 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
         </button>
-        {isOpen && <div className="py-4 px-2 space-y-4">{children}</div>}
+        {isOpen && <div className="px-4 pb-4 space-y-4">{children}</div>}
     </div>
 );
 
@@ -127,9 +128,30 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
     
     const handleBackgroundColorChange = (color: string) => {
         const dataUrl = colorTo1x1PngDataURL(color);
-        const base64 = dataUrl.split(',')[1];
+        const base64 = getBase64FromDataUrl(dataUrl);
         onPageUpdate(page.id, { base64 });
     };
+
+    const isBannerType = useMemo(() => [DesignType.Banner, DesignType.Placard, DesignType.WideBanner, DesignType.XBanner].includes(page.type), [page.type]);
+
+    const fontWarning = useMemo(() => {
+        if (!isBannerType || selectionType !== 'text' || !selectedLayer) return null;
+        if ('content' in selectedLayer) {
+            const fontInfo = KOREAN_FONTS_LIST.find(f => f.name === selectedLayer.fontFamily);
+            if (fontInfo && (fontInfo.style === 'handwriting' || fontInfo.weights.every(w => w < 700))) {
+                return "가독성이 낮은 서체입니다. 현수막에는 'Black Han Sans'와 같은 굵은 고딕체를 권장합니다.";
+            }
+        }
+        return null;
+    }, [isBannerType, selectionType, selectedLayer]);
+
+    const strokeWarning = useMemo(() => {
+        if (!isBannerType || selectionType !== 'text' || !selectedLayer) return null;
+        if ('content' in selectedLayer && selectedLayer.effect?.type === 'stroke' && selectedLayer.effect.width > 5) {
+             return "두꺼운 외곽선은 가독성을 해칠 수 있습니다. 대신 그림자 효과를 사용해 보세요.";
+        }
+        return null;
+    }, [isBannerType, selectionType, selectedLayer]);
 
     const renderEffectControls = () => {
         if (selectionType !== 'text' || !selectedLayer || !('content' in selectedLayer)) return null;
@@ -206,9 +228,9 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                 </div>
             </div>
             
-            <div className="p-3 flex-grow">
+            <div className="flex-grow">
                 {selectionType === 'page' && (
-                    <div className="space-y-4">
+                    <div className="space-y-4 p-4">
                         <div className="grid grid-cols-2 gap-2">
                             <div><Label htmlFor="page-w" className="text-xs">너비(mm)</Label><Input type="number" id="page-w" value={Math.round(page.width_mm || 0)} onChange={e => onPageUpdate(page.id, { width_mm: +e.target.value })} /></div>
                             <div><Label htmlFor="page-h" className="text-xs">높이(mm)</Label><Input type="number" id="page-h" value={Math.round(page.height_mm || 0)} onChange={e => onPageUpdate(page.id, { height_mm: +e.target.value })} /></div>
@@ -252,7 +274,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                                         <Label className="text-xs">채우기</Label>
                                         <div className="flex items-center gap-2 mb-2">
                                             <Button size="sm" variant={typeof selectedLayer.fill === 'string' ? 'primary' : 'secondary'} className="flex-1" onClick={() => handleLayerUpdate(selectedLayer.id, { fill: typeof selectedLayer.fill === 'object' ? selectedLayer.fill.stops[0].color : '#6366f1' })}>단색</Button>
-                                            <Button size="sm" variant={typeof selectedLayer.fill === 'object' ? 'primary' : 'secondary'} className="flex-1" onClick={() => handleLayerUpdate(selectedLayer.id, { fill: { type: 'linear', angle: 90, stops: [{ color: typeof selectedLayer.fill === 'string' ? selectedLayer.fill : '#6366f1', offset: 0 }, { color: '#ffffff', offset: 100 }] } })}>그라데이션</Button>
+                                            <Button size="sm" variant={typeof selectedLayer.fill === 'object' ? 'primary' : 'secondary'} className="flex-1" onClick={() => handleLayerUpdate(selectedLayer.id, { fill: { type: 'linear', angle: 90, stops: [{ id: uuidv4(), color: typeof selectedLayer.fill === 'string' ? selectedLayer.fill : '#6366f1', offset: 0 }, { id: uuidv4(), color: '#ffffff', offset: 100 }] } })}>그라데이션</Button>
                                         </div>
                                         {typeof selectedLayer.fill === 'string' ? (
                                             <ColorPicker value={selectedLayer.fill} onChange={color => handleLayerUpdate(selectedLayer.id, { fill: color })} onActivateEyedropper={() => onActivateEyedropper(color => handleLayerUpdate(selectedLayer.id, { fill: color }))} />
@@ -266,13 +288,13 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                                                 <div>
                                                     <Label className="text-xs">색상 지점</Label>
                                                     {(selectedLayer.fill as Gradient).stops.map((stop, index) => (
-                                                        <div key={index} className="flex items-center gap-2 mb-2 p-2 bg-white rounded">
+                                                        <div key={stop.id} className="flex items-center gap-2 mb-2 p-2 bg-white rounded">
                                                             <ColorPicker value={stop.color} onChange={color => { const newStops = [...(selectedLayer.fill as Gradient).stops]; newStops[index] = { ...stop, color }; handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); }} onActivateEyedropper={() => onActivateEyedropper(color => { const newStops = [...(selectedLayer.fill as Gradient).stops]; newStops[index] = { ...stop, color }; handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); })}/>
                                                             <Input className="w-16" type="number" min="0" max="100" value={stop.offset} onChange={e => { const newStops = [...(selectedLayer.fill as Gradient).stops]; newStops[index] = { ...stop, offset: +e.target.value }; handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); }}/>
                                                             <button onClick={() => { const newStops = (selectedLayer.fill as Gradient).stops.filter((_, i) => i !== index); handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); }} disabled={(selectedLayer.fill as Gradient).stops.length <= 2} className="disabled:text-slate-300"><XCircleIcon className="w-5 h-5"/></button>
                                                         </div>
                                                     ))}
-                                                     <Button size="sm" variant="secondary" className="w-full" onClick={() => { const newStops = [...(selectedLayer.fill as Gradient).stops, { color: '#000000', offset: 100 }]; handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); }}><PlusIcon className="w-4 h-4 mr-1"/> 색상 추가</Button>
+                                                     <Button size="sm" variant="secondary" className="w-full" onClick={() => { const newStops = [...(selectedLayer.fill as Gradient).stops, { id: uuidv4(), color: '#000000', offset: 100 }]; handleLayerUpdate(selectedLayer.id, { fill: { ...(selectedLayer.fill as Gradient), stops: newStops } }); }}><PlusIcon className="w-4 h-4 mr-1"/> 색상 추가</Button>
                                                 </div>
                                             </div>
                                         )}
@@ -287,6 +309,12 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                         {selectionType === 'text' && selectedLayer && 'content' in selectedLayer && (
                             <>
                                 <InspectorAccordion title="텍스트" isOpen={openAccordions.has('text')} onToggle={() => toggleAccordion('text')}>
+                                     {fontWarning && (
+                                        <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-md text-xs text-yellow-800 flex items-start gap-2">
+                                            <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                            <span>{fontWarning}</span>
+                                        </div>
+                                    )}
                                     <Select value={selectedLayer.fontFamily} onChange={e => handleLayerUpdate(selectedLayer.id, { fontFamily: e.target.value })} className="flex-grow">
                                         {KOREAN_FONTS_LIST.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
                                     </Select>
@@ -316,6 +344,12 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                                 <InspectorAccordion title="텍스트 효과" isOpen={openAccordions.has('effects')} onToggle={() => toggleAccordion('effects')}>
                                     <div className="grid grid-cols-3 gap-2">{effectPresets.map(preset => (<button key={preset.type} onClick={() => handleLayerUpdate(selectedLayer.id, { effect: defaultEffects[preset.type] })} className={`p-2 text-xs text-center border-2 rounded-md ${selectedLayer.effect?.type === preset.type ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white'}`}><div className="h-10 w-full bg-slate-200 flex items-center justify-center rounded mb-1 font-bold text-lg" style={getEffectStyles(defaultEffects[preset.type])}>Ag</div>{preset.label}</button>))}</div>
                                     <div className="mt-4 space-y-3 pt-3 border-t">
+                                        {strokeWarning && (
+                                            <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-md text-xs text-yellow-800 flex items-start gap-2 mb-3">
+                                                <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                                <span>{strokeWarning}</span>
+                                            </div>
+                                        )}
                                         {renderEffectControls()}
                                     </div>
                                 </InspectorAccordion>
@@ -357,7 +391,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                 </InspectorAccordion>
             </div>
 
-            <div className="p-3 border-t border-slate-200 mt-auto bg-white">
+            <div className="p-3 border-t border-slate-200 mt-auto bg-slate-50">
                 <div className="grid grid-cols-3 gap-2">
                     <Button variant="secondary" size="sm" onClick={() => handleLayerOrderChange('front')} title="맨 앞으로" disabled={selectedLayers.length === 0}><BringForwardIcon className="w-5 h-5"/></Button>
                     <Button variant="secondary" size="sm" onClick={() => handleLayerOrderChange('backward')} title="뒤로" disabled={selectedLayers.length === 0}><SendBackwardIcon className="w-5 h-5"/></Button>

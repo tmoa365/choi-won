@@ -9,7 +9,9 @@ interface HeaderProps {
     onNavigateHome: () => void;
     onCreateNewDesign: (type: DesignType, dimensions?: { width_mm: number, height_mm: number }) => void;
     onStartWizardWithType: (type: GenerationOption) => void;
+    onStartSeasonalWizard: () => void;
     onOpenBrief: () => void;
+    onOpenTemplates: () => void;
     onTriggerImport: () => void;
     onExport: () => void;
     onReset: () => void;
@@ -25,7 +27,9 @@ export const Header: React.FC<HeaderProps> = ({
     onNavigateHome,
     onCreateNewDesign,
     onStartWizardWithType,
+    onStartSeasonalWizard,
     onOpenBrief,
+    onOpenTemplates,
     onTriggerImport,
     onExport,
     onReset,
@@ -58,7 +62,11 @@ export const Header: React.FC<HeaderProps> = ({
                             <BookIcon className="h-5 w-5 mr-2"/> 디자인 정보 수정
                         </Button>
                     )}
-                    <NewDesignDropdown onCreateNewDesign={onCreateNewDesign} onStartWizardWithType={onStartWizardWithType} />
+                    <Button onClick={onOpenTemplates} variant="secondary">
+                        <GridIcon className="h-5 w-5 mr-2" />
+                        템플릿
+                    </Button>
+                    <NewDesignDropdown onCreateNewDesign={onCreateNewDesign} onStartWizardWithType={onStartWizardWithType} onStartSeasonalWizard={onStartSeasonalWizard} />
                     <Button onClick={onTriggerImport} variant="secondary" title="프로젝트 불러오기"><UploadIcon className="h-5 w-5"/></Button>
                     <Button onClick={onExport} variant="secondary" title="프로젝트 파일로 저장"><DownloadIcon className="h-5 w-5"/></Button>
                     <Button onClick={onReset} variant="secondary" title="모든 데이터 초기화"><ResetIcon className="h-5 w-5"/></Button>

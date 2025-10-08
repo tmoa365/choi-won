@@ -1,5 +1,6 @@
 import { GenerateContentResponse, Modality, Type } from "@google/genai";
 import { ai } from "./geminiClient";
+import { processChromaKeyTransparency } from "../vicEdit/utils";
 
 const generateImage = async (prompt: string, aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9' = '3:4') => {
     try {
@@ -84,7 +85,7 @@ const editImageWithText = async (prompt: string, imageBase64: string): Promise<s
                 return part.inlineData.data;
             }
         }
-        throw new Error("AI image generation from image failed, no image was returned.");
+        throw new Error("AI image generation from image failed, no image was returned in the response.");
     } catch (error) {
         console.error('Error generating image from image and text:', error);
         throw error;
@@ -94,8 +95,7 @@ const editImageWithText = async (prompt: string, imageBase64: string): Promise<s
 export const generateDesignElement = async (prompt: string): Promise<string> => {
     try {
         const fullPrompt = `Create a high-quality, simple, flat, vector-style icon based on the following request: "${prompt}".
-        - The background MUST be transparent (real alpha channel).
-        - CRITICAL: Do NOT draw a checkerboard pattern to simulate transparency. The background must not contain any patterns.
+        - The background MUST be a solid, vibrant green color screen (#00FF00). The background must not contain any other patterns or colors.
         - The icon should be modern, clean, and suitable for a graphic design project.
         - Avoid complex details, text, letters, or numbers.
         - The main object should be centered.`;
@@ -111,7 +111,15 @@ export const generateDesignElement = async (prompt: string): Promise<string> => 
         });
         
         if (response.generatedImages && response.generatedImages.length > 0) {
-            return response.generatedImages[0].image.imageBytes;
+            const greenScreenedBase64 = response.generatedImages[0].image.imageBytes;
+            // Post-process to make the green background transparent
+            const finalBase64 = await processChromaKeyTransparency(
+                `data:image/png;base64,${greenScreenedBase64}`,
+                { r: 0, g: 255, b: 0 },
+                40 // Tolerance for anti-aliasing and color variations
+            );
+            // Return only the base64 part
+            return finalBase64.split(',')[1];
         }
         throw new Error("AI Element generation failed, no image was returned.");
     } catch (error) {
@@ -181,7 +189,7 @@ export const removeBackgroundImage = async (base64ImageData: string, mimeType: s
             },
         };
         const textPart = {
-            text: 'Analyze the main subject of this image and create a new version with the background completely removed, resulting in a transparent background. The resulting background must be true transparency (alpha channel), not a checkerboard pattern. Only return the edited image, do not add any text.',
+            text: 'Analyze the main subject of this image. Your task is to create a new version where the original background is completely replaced with a solid, vibrant green color screen (#00FF00). The subject must be perfectly preserved with clean, anti-aliased edges. The background MUST be ONLY the color #00FF00 green, with no other patterns or colors. Only return the edited image.',
         };
 
         const response: GenerateContentResponse = await ai.models.generateContent({
@@ -194,12 +202,43 @@ export const removeBackgroundImage = async (base64ImageData: string, mimeType: s
         
         for (const part of response.candidates[0].content.parts) {
             if (part.inlineData) {
-                return part.inlineData.data;
+                const greenScreenedBase64 = part.inlineData.data;
+                // Post-process the image to make the green background transparent
+                const finalBase64 = await processChromaKeyTransparency(
+                    `data:image/png;base64,${greenScreenedBase64}`,
+                    { r: 0, g: 255, b: 0 },
+                    40 // Tolerance for anti-aliasing
+                );
+                return finalBase64.split(',')[1];
             }
         }
         throw new Error("Background removal failed, no image was returned in the response.");
     } catch (error) {
         console.error('Error removing background:', error);
+        throw error;
+    }
+};
+
+export const extractCleanBackground = async (base64ImageData: string, mimeType: string): Promise<string> => {
+    const prompt = `Analyze this image and identify the main foreground subjects (people, objects, prominent text). Your task is to remove these foreground subjects completely and intelligently fill in the erased areas using the surrounding background textures and patterns (inpainting). The result should be a clean, realistic background image with no trace of the original subjects. Return only the final background image.`;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [
+                { inlineData: { data: base64ImageData, mimeType } },
+                { text: prompt },
+            ]},
+            config: { responseModalities: [Modality.IMAGE, Modality.TEXT] },
+        });
+
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return part.inlineData.data;
+            }
+        }
+        throw new Error("AI background extraction failed, no image was returned.");
+    } catch (error) {
+        console.error('Error with AI background extraction:', error);
         throw error;
     }
 };
@@ -231,18 +270,26 @@ export const extractColorsFromImage = async (base64ImageData: string): Promise<s
         });
 
         const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        const colors: string[] = result.colors || [];
-        // Validate that the returned colors are valid hex codes
-        return colors.filter(color => /^#[0-9A-F]{6}$/i.test(color));
+        try {
+            const result = JSON.parse(jsonString);
+            const colors: string[] = result.colors || [];
+            // Validate that the returned colors are valid hex codes
+            return colors.filter(color => /^#[0-9A-F]{6}$/i.test(color));
+        } catch (parseError) {
+            console.error("JSON parsing error in extractColorsFromImage. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error extracting colors from image:', error);
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
         throw new Error("Failed to extract colors from image.");
     }
 };
 
 export const cropImageWithAI = async (base64ImageData: string, mimeType: string): Promise<string> => {
-    const prompt = 'Identify the main subject of this image and crop the image to focus tightly on it, maintaining the original aspect ratio. Return only the final, cropped image. If the original image had a transparent background, the cropped image must also have a real transparent background (alpha channel), not a checkerboard pattern.';
+    const prompt = 'Identify the main subject of this image. Your task is to create a new, tightly cropped version focusing on this subject. The background of the new image must be completely replaced with a solid, vibrant green color screen (#00FF00). The subject must be perfectly preserved with clean, anti-aliased edges against the green background. The background MUST be ONLY the color #00FF00 green. Return only the final, cropped image.';
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
@@ -255,7 +302,13 @@ export const cropImageWithAI = async (base64ImageData: string, mimeType: string)
 
         for (const part of response.candidates[0].content.parts) {
             if (part.inlineData) {
-                return part.inlineData.data;
+                const greenScreenedBase64 = part.inlineData.data;
+                const finalBase64 = await processChromaKeyTransparency(
+                    `data:image/png;base64,${greenScreenedBase64}`,
+                    { r: 0, g: 255, b: 0 },
+                    40 // Tolerance
+                );
+                return finalBase64.split(',')[1];
             }
         }
         throw new Error("AI smart crop failed, no image was returned.");
@@ -288,17 +341,18 @@ export const expandImageWithAI = async (
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error("Could not get canvas context");
 
+        // Draw original image in the center of the new larger canvas
         const drawX = (targetWidth - naturalWidth) / 2;
         const drawY = (targetHeight - naturalHeight) / 2;
-
         ctx.drawImage(img, drawX, drawY, naturalWidth, naturalHeight);
 
+        // Get the base64 of the composite image (original image on a transparent larger canvas)
         const compositeBase64 = canvas.toDataURL('image/png').split(',')[1];
 
-        const fullPrompt = `You are an AI image editor. The user has provided an image placed on a larger transparent canvas. 
-        Your task is to fill the surrounding transparent area, seamlessly extending the original image to create a larger picture. 
-        Match the style, lighting, and content of the original image perfectly. The final image should have no transparency.
-        User's additional instruction: "${prompt || 'Continue the image naturally.'}"`;
+        const fullPrompt = `You are an AI image editor performing an 'outpainting' task. The user has provided an image placed on a larger transparent canvas. 
+        Your task is to fill in the surrounding transparent area, seamlessly extending the original image to create a larger, complete picture. 
+        You must match the style, lighting, and content of the original image perfectly. The final image should have no transparency.
+        Here is the user's specific instruction for the expansion: "${prompt || 'Continue the image naturally in all directions.'}"`;
 
         const imagePart = { inlineData: { data: compositeBase64, mimeType: 'image/png' } };
         const textPart = { text: fullPrompt };
@@ -316,7 +370,7 @@ export const expandImageWithAI = async (
                 return part.inlineData.data;
             }
         }
-        throw new Error("AI image expansion failed, no image was returned.");
+        throw new Error("AI image expansion failed, no image was returned in the response.");
 
     } catch (error) {
         console.error("Error in expandImageWithAI:", error);

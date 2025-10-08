@@ -30,14 +30,16 @@ export const TONE_AND_MANNERS: { [key: string]: string } = {
 };
 
 export const MATERIAL_DIMENSIONS: { [key in DesignType]: { width_mm: number; height_mm: number } } = {
+  // FIX: Add placeholder for AutoDetect to satisfy type requirements. This value is not used directly.
+  [DesignType.AutoDetect]: { width_mm: 0, height_mm: 0 },
   [DesignType.Poster]: { width_mm: 420, height_mm: 594 }, // A2
   [DesignType.Booklet]: { width_mm: 210, height_mm: 297 }, // A4
   [DesignType.CardNews]: { width_mm: 120, height_mm: 120 }, // 1:1 ratio
   [DesignType.BusinessCardFront]: { width_mm: 90, height_mm: 50 },
   [DesignType.BusinessCardBack]: { width_mm: 90, height_mm: 50 },
-  [DesignType.Banner]: { width_mm: 5000, height_mm: 900 },
+  [DesignType.Banner]: { width_mm: 6000, height_mm: 900 },
   [DesignType.Flyer]: { width_mm: 210, height_mm: 297 }, // A4
-  [DesignType.Placard]: { width_mm: 5000, height_mm: 900 },
+  [DesignType.Placard]: { width_mm: 6000, height_mm: 900 },
   [DesignType.VColoring]: { width_mm: 108, height_mm: 192 }, // 9:16
   [DesignType.MobileBusinessCard]: { width_mm: 108, height_mm: 192 }, // 9:16
   [DesignType.SeasonalGreeting]: { width_mm: 108, height_mm: 135 }, // 4:5
@@ -61,4 +63,7 @@ export const MATERIAL_DIMENSIONS: { [key in DesignType]: { width_mm: number; hei
   // Stage 3
   [DesignType.ProductBox]: { width_mm: 157, height_mm: 157 }, // Example cosmetics box
   [DesignType.WindowSheeting]: { width_mm: 1000, height_mm: 500 },
+  // New Banner types
+  [DesignType.WideBanner]: { width_mm: 6000, height_mm: 300 },
+  [DesignType.XBanner]: { width_mm: 600, height_mm: 1800 },
 };

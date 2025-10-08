@@ -4,14 +4,23 @@ import { DesignPage, DesignProject, TextEffect, TextLayer, ImageLayer, ShapeLaye
 import { MATERIAL_DIMENSIONS } from '../constants';
 import { KOREAN_FONTS_MAP } from '../components/fonts';
 import { PARTY_BRANDING } from '../components/brandAssets';
+import * as pdfjsLib from 'pdfjs-dist';
+
+try {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
+} catch (e) {
+  console.warn("Could not set pdf.js worker source from import.meta.url, falling back to CDN. This might happen in some environments.");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+}
+
 
 declare global {
     interface Window {
-        html2canvas: any;
+        html2canvas: (element: HTMLElement, options?: any) => Promise<HTMLCanvasElement>;
     }
 }
 
-export const DPI = 300;
+export const DPI = 96;
 export const mmToPx = (mm: number): number => Math.round((mm / 25.4) * DPI);
 export const ptToPx = (pt: number): number => Math.round(pt * (DPI / 72));
 
@@ -59,12 +68,22 @@ export const buildAssetUrlMap = (projectData: DesignProject): Map<string, string
     return map;
 };
 
+export const getBase64FromDataUrl = (dataUrl: string): string => {
+    const commaIndex = dataUrl.indexOf(',');
+    if (commaIndex === -1) {
+        // If no comma, assume the whole string is base64, or it's not a data URL.
+        // This is a fallback. A proper data URL will have a comma.
+        return dataUrl; 
+    }
+    return dataUrl.substring(commaIndex + 1);
+};
+
 export const dataURLtoFile = (dataurl: string, filename: string): File => {
     const arr = dataurl.split(',');
     const mimeMatch = arr[0].match(/:(.*?);/);
     if (!mimeMatch) throw new Error('Invalid data URL');
     const mime = mimeMatch[1];
-    const bstr = atob(arr[1]);
+    const bstr = atob(getBase64FromDataUrl(dataurl));
     let n = bstr.length;
     const u8arr = new Uint8Array(n);
     while (n > 0) {
@@ -244,4 +263,83 @@ export const getApiErrorMessage = (error: unknown, context: string = 'AI 작업'
         }
     }
     return `${context} 중 오류가 발생했습니다. 다시 시도해주세요.`;
+};
+
+export const renderPdfToPngDataURL = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+    const page = await pdf.getPage(1); // Get the first page
+
+    const viewport = page.getViewport({ scale: 1.5 }); // Use a decent scale for quality
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    if (!context) {
+        throw new Error('Could not get canvas context');
+    }
+
+    const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+    };
+
+    // FIX: The error indicates a discrepancy in the RenderParameters type definition
+    // for this project's environment. While non-standard, satisfying the type checker
+    // by passing the `renderContext` as `any` is a pragmatic solution when types are incorrect.
+    // The runtime call is correct according to official pdf.js documentation.
+    // Note: The original error pointed to a non-existent `canvas` property, which suggests faulty type definitions.
+    // An alternative would be `(renderContext as unknown as pdfjsLib.RenderParameters)`
+    await page.render(renderContext as any).promise;
+    return canvas.toDataURL('image/png');
+};
+
+export const processChromaKeyTransparency = (
+    base64Image: string,
+    keyColor: { r: number, g: number, b: number },
+    tolerance: number = 10
+): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+
+            if (!ctx) {
+                return reject(new Error('Could not get canvas context'));
+            }
+
+            ctx.drawImage(img, 0, 0);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                const distance = Math.sqrt(
+                    Math.pow(r - keyColor.r, 2) +
+                    Math.pow(g - keyColor.g, 2) +
+                    Math.pow(b - keyColor.b, 2)
+                );
+
+                if (distance < tolerance) {
+                    data[i + 3] = 0; // Set alpha to 0 (transparent)
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = (error) => {
+            reject(new Error('Failed to load image for chroma key processing'));
+        };
+        img.src = base64Image;
+    });
 };

@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DesignProject, DesignPage, TextLayer, ImageLayer, ShapeLayer, ImageAsset, DesignBrief, DesignDocument, Group, DataMapping, Fill, GenerationOption, AllLayer, MagicWandState, Interaction, BrandColor } from '../types';
+import { DesignProject, DesignPage, TextLayer, ImageLayer, ShapeLayer, ImageAsset, DesignBrief, DesignDocument, Group, DataMapping, Fill, GenerationOption, AllLayer, MagicWandState, Interaction, BrandColor, DesignType } from '../types';
 import { Canvas } from './Canvas';
 import { InspectorPanel } from './InspectorPanel';
 import { LeftPanel } from './LeftPanel';
-import { buildAssetUrlMap, dataURLtoFile, mmToPx, getApiErrorMessage } from './utils';
+// FIX: Import fileToDataURL to resolve undefined errors.
+import { buildAssetUrlMap, dataURLtoFile, mmToPx, getApiErrorMessage, getBase64FromDataUrl, fileToDataURL } from './utils';
 import { v4 as uuidv4 } from 'uuid';
-import { suggestFont, generateInArea, refinePageLayout, refineTextContent, removeBackgroundImage, cropImageWithAI, generateAltText, extractColorsFromImage, executeMagicWandAction, expandImageWithAI } from '../services';
+import { suggestFont, generateInArea, refinePageLayout, refineTextContent, removeBackgroundImage, cropImageWithAI, generateAltText, extractColorsFromImage, executeMagicWandAction, expandImageWithAI, adaptPageLayout, remixPageLayout } from '../services';
 import { PageNavigator } from '../components/PageNavigator';
 import { Toolbar, Tool } from './Toolbar';
 import { AiGenerateModal } from '../components/AiGenerateModal';
 import { AiAction } from '../components/AiAssistantModal';
 import { DataDrivenModal } from '../components/DataDrivenModal';
 import { AiMagicWandInput } from '../components/AiMagicWandInput';
+import { RemixSuggestionsModal } from '../components/RemixSuggestionsModal';
 
 interface EditorProps {
     editingDocument: DesignDocument;
@@ -22,6 +24,7 @@ interface EditorProps {
     onDeletePage: (index: number) => void;
     projectData: DesignProject;
     updateProjectData: (updater: (prev: DesignProject) => DesignProject) => void;
+    onDeleteAsset: (assetId: string) => void;
     forceAiAssistant: boolean;
     onAiAssistantClose: () => void;
     onStartGeneration: (genOption: GenerationOption, brief: DesignBrief) => void;
@@ -33,7 +36,7 @@ interface EditorProps {
 export const Editor: React.FC<EditorProps> = (props) => {
     const { 
         editingDocument, activePageIndex, onPageUpdate, onSelectPage, onAddPage, onDeletePage,
-        projectData, updateProjectData, forceAiAssistant, onAiAssistantClose, onStartGeneration,
+        projectData, updateProjectData, onDeleteAsset, forceAiAssistant, onAiAssistantClose, onStartGeneration,
         setError, onDocumentCreationCloseEditor, onStartWizard
     } = props;
     
@@ -52,6 +55,7 @@ export const Editor: React.FC<EditorProps> = (props) => {
     const [magicWandState, setMagicWandState] = useState<MagicWandState | null>(null);
     const [isProcessingMagicWand, setIsProcessingMagicWand] = useState(false);
     const [expandState, setExpandState] = useState<{ layerId: string; x: number; y: number } | null>(null);
+    const [remixSuggestions, setRemixSuggestions] = useState<Partial<DesignPage>[] | null>(null);
 
 
     // State for synthetic background layer properties
@@ -160,6 +164,43 @@ export const Editor: React.FC<EditorProps> = (props) => {
         }
     };
 
+    const handleDataDrivenGenerate = (data: Record<string, string>[], mapping: DataMapping) => {
+        setIsDataDrivenModalOpen(false);
+        const templatePage = page;
+
+        const newPages: DesignPage[] = data.map((row, index) => {
+            const newPage: DesignPage = JSON.parse(JSON.stringify(templatePage));
+            newPage.id = uuidv4();
+            newPage.pageNumber = index + 1;
+            newPage.textLayers = newPage.textLayers.map(layer => {
+                const mappedHeader = mapping[layer.id];
+                if (mappedHeader && row[mappedHeader] !== undefined) {
+                    return { ...layer, content: row[mappedHeader] };
+                }
+                return layer;
+            });
+            return newPage;
+        });
+
+        if (newPages.length === 0) {
+            setError("데이터로부터 생성할 페이지가 없습니다.");
+            return;
+        }
+
+        const newDocument: DesignDocument = {
+            id: uuidv4(),
+            name: `${editingDocument.name} - 데이터 생성 결과`,
+            pages: newPages,
+        };
+
+        updateProjectData(p => ({
+            ...p,
+            documents: [newDocument, ...p.documents],
+        }));
+
+        onDocumentCreationCloseEditor();
+        alert(`'${newDocument.name}' 문서가 생성되어 '내 디자인' 목록에 추가되었습니다. 총 ${newPages.length}개의 페이지가 생성되었습니다.`);
+    };
 
     // When page changes, clear selection and reset background state
     useEffect(() => {
@@ -380,6 +421,25 @@ export const Editor: React.FC<EditorProps> = (props) => {
         setSelectedLayerIds(selectedLayerIds.filter(id => allLayers.find(l => l.id === id)?.groupId === groupId));
     }, [page, onPageUpdate, selectedLayers, setSelectedLayerIds, selectedLayerIds, allLayers]);
     
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+             const target = e.target as HTMLElement;
+             if (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+            switch(e.key) {
+                case 'Delete': case 'Backspace': deleteSelectedLayers(); break;
+                case 'c': if(e.metaKey || e.ctrlKey) handleCopy(); break;
+                case 'v': if(e.metaKey || e.ctrlKey) handlePaste(); break;
+                // FIX: Use handleGroup for the keyboard shortcut.
+                case 'g': if(e.metaKey || e.ctrlKey) { e.preventDefault(); handleGroup(); } break;
+                // FIX: Use handleUngroup for the keyboard shortcut.
+                case 'G': if(e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); handleUngroup(); } break;
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+        // FIX: Update dependency array for useEffect.
+    }, [deleteSelectedLayers, handleCopy, handlePaste, handleGroup, handleUngroup]);
+
     const activateEyedropper = (callback: (color: string) => void) => {
         setEyedropperState({ callback });
     };
@@ -407,6 +467,65 @@ export const Editor: React.FC<EditorProps> = (props) => {
         }
     };
 
+    const handleAiExpand = (layerId: string, event: React.MouseEvent) => {
+        setExpandState({ layerId, x: event.clientX, y: event.clientY });
+    };
+
+    const handleExecuteExpand = async (prompt: string) => {
+        if (!expandState) return;
+        const { layerId } = expandState;
+        const actionId = `expand-${layerId}`;
+        setIsProcessingAiAction(actionId);
+        setError(null);
+
+        const layer = page.imageLayers.find(l => l.id === layerId);
+        const asset = layer ? projectData.imageLibrary.find(a => a.id === layer.assetId) : null;
+        
+        if (layer && asset) {
+            try {
+                // Expand by 50% for a significant change
+                const newWidth = Math.round(layer.width * 1.5);
+                const newHeight = Math.round(layer.height * 1.5);
+
+                const base64 = await fileToDataURL(asset.file).then(getBase64FromDataUrl);
+                
+                const newBase64 = await expandImageWithAI(base64, asset.file.type, newWidth, newHeight, prompt);
+                
+                const dataUrl = `data:image/png;base64,${newBase64}`;
+                const newFile = dataURLtoFile(dataUrl, `expanded_${asset.file.name}`);
+                const image = new Image();
+                image.src = dataUrl;
+                await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+
+                const newAsset: ImageAsset = {
+                    id: uuidv4(),
+                    file: newFile,
+                    previewUrl: URL.createObjectURL(newFile),
+                    width: image.naturalWidth,
+                    height: image.naturalHeight,
+                };
+
+                updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, newAsset] }));
+
+                // Update the layer, centering the new larger image over the old position
+                handleLayerUpdate(layerId, {
+                    assetId: newAsset.id,
+                    left: layer.left - (newWidth - layer.width) / 2,
+                    top: layer.top - (newHeight - layer.height) / 2,
+                    width: newWidth,
+                    height: newHeight,
+                });
+            } catch (err) {
+                setError(getApiErrorMessage(err, 'AI 이미지 확장'));
+            } finally {
+                setIsProcessingAiAction(null);
+                setExpandState(null);
+            }
+        } else {
+            setIsProcessingAiAction(null);
+            setExpandState(null);
+        }
+    };
 
     const handleExecuteAiAction = useCallback(async (action: AiAction) => {
         const actionId = `${action.type}-${'layerId' in action ? action.layerId : 'page'}`;
@@ -414,6 +533,16 @@ export const Editor: React.FC<EditorProps> = (props) => {
         setError(null);
         try {
             switch (action.type) {
+                case 'remixPage':
+                    const suggestions = await remixPageLayout(page, projectData);
+                    setRemixSuggestions(suggestions);
+                    break;
+                case 'adaptPage':
+                    const newDocument = await adaptPageLayout(page, projectData, action.targetType);
+                    updateProjectData(p => ({ ...p, documents: [newDocument, ...p.documents] }));
+                    onDocumentCreationCloseEditor();
+                    alert(`'${newDocument.name}' 디자인이 '내 디자인' 목록에 추가되었습니다.`);
+                    break;
                 case 'refinePage':
                     const newLayout = await refinePageLayout(page, projectData, action.prompt);
                     onPageUpdate(page.id, newLayout);
@@ -436,12 +565,7 @@ export const Editor: React.FC<EditorProps> = (props) => {
                     const imageLayer = page.imageLayers.find(l => l.id === action.layerId);
                     const asset = imageLayer ? projectData.imageLibrary.find(a => a.id === imageLayer.assetId) : null;
                     if (asset) {
-                        const base64 = await new Promise<string>((res, rej) => {
-                            const reader = new FileReader();
-                            reader.readAsDataURL(asset.file);
-                            reader.onload = () => res((reader.result as string).split(',')[1]);
-                            reader.onerror = rej;
-                        });
+                        const base64 = await fileToDataURL(asset.file).then(getBase64FromDataUrl);
                         const newBase64 = await removeBackgroundImage(base64, asset.file.type);
                         const dataUrl = `data:image/png;base64,${newBase64}`;
                         const newFile = dataURLtoFile(dataUrl, `bg_removed_${asset.file.name}`);
@@ -453,7 +577,7 @@ export const Editor: React.FC<EditorProps> = (props) => {
                             file: newFile,
                             previewUrl: URL.createObjectURL(newFile),
                             width: image.naturalWidth,
-                            height: image.naturalHeight
+                            height: image.naturalHeight,
                         };
                         updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, newAsset]}));
                         handleLayerUpdate(action.layerId, { assetId: newAsset.id });
@@ -462,13 +586,8 @@ export const Editor: React.FC<EditorProps> = (props) => {
                 case 'smartCrop':
                      const cropLayer = page.imageLayers.find(l => l.id === action.layerId);
                      const cropAsset = cropLayer ? projectData.imageLibrary.find(a => a.id === cropLayer.assetId) : null;
-                     if (cropAsset) {
-                         const base64 = await new Promise<string>((res, rej) => {
-                            const reader = new FileReader();
-                            reader.readAsDataURL(cropAsset.file);
-                            reader.onload = () => res((reader.result as string).split(',')[1]);
-                            reader.onerror = rej;
-                        });
+                     if (cropAsset && cropLayer) {
+                        const base64 = await fileToDataURL(cropAsset.file).then(getBase64FromDataUrl);
                         const newBase64 = await cropImageWithAI(base64, cropAsset.file.type);
                         const dataUrl = `data:image/png;base64,${newBase64}`;
                         const newFile = dataURLtoFile(dataUrl, `cropped_${cropAsset.file.name}`);
@@ -480,205 +599,77 @@ export const Editor: React.FC<EditorProps> = (props) => {
                             file: newFile,
                             previewUrl: URL.createObjectURL(newFile),
                             width: image.naturalWidth,
-                            height: image.naturalHeight
+                            height: image.naturalHeight,
                         };
-                        updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, newAsset]}));
-                        handleLayerUpdate(action.layerId, { assetId: newAsset.id });
-                     }
+                        updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, newAsset] }));
+                        handleLayerUpdate(action.layerId, {
+                            assetId: newAsset.id,
+                            width: image.naturalWidth,
+                            height: image.naturalHeight,
+                            left: cropLayer.left + (cropLayer.width - image.naturalWidth) / 2,
+                            top: cropLayer.top + (cropLayer.height - image.naturalHeight) / 2,
+                        });
+                    }
                     break;
                 case 'generateAltText':
                     const altLayer = page.imageLayers.find(l => l.id === action.layerId);
                     const altAsset = altLayer ? projectData.imageLibrary.find(a => a.id === altLayer.assetId) : null;
                     if (altAsset) {
-                        const base64 = await new Promise<string>((res, rej) => {
-                            const reader = new FileReader();
-                            reader.readAsDataURL(altAsset.file);
-                            reader.onload = () => res((reader.result as string).split(',')[1]);
-                            reader.onerror = rej;
-                        });
-                        const altText = await generateAltText(base64);
-                        handleLayerUpdate(action.layerId, { alt: altText });
+                        const base64 = await fileToDataURL(altAsset.file).then(getBase64FromDataUrl);
+                        const newAltText = await generateAltText(base64);
+                        handleLayerUpdate(action.layerId, { alt: newAltText });
+                        alert(`AI가 생성한 대체 텍스트가 적용되었습니다: "${newAltText}"`);
                     }
                     break;
-                 case 'extractColors':
+                case 'extractColors':
                     const colorLayer = page.imageLayers.find(l => l.id === action.layerId);
                     const colorAsset = colorLayer ? projectData.imageLibrary.find(a => a.id === colorLayer.assetId) : null;
                     if (colorAsset) {
-                        const base64 = await new Promise<string>((res, rej) => {
-                            const reader = new FileReader();
-                            reader.readAsDataURL(colorAsset.file);
-                            reader.onload = () => res((reader.result as string).split(',')[1]);
-                            reader.onerror = rej;
-                        });
+                        const base64 = await fileToDataURL(colorAsset.file).then(getBase64FromDataUrl);
                         const colors = await extractColorsFromImage(base64);
+                        
                         updateProjectData(p => {
-                            const existingColorValues = new Set(p.brandKit.colors.map(c => c.value));
-                            const newBrandColors = colors
-                                .filter(colorStr => !existingColorValues.has(colorStr))
-                                .map(colorStr => ({
-                                    id: uuidv4(),
-                                    role: 'Accent' as const,
-                                    value: colorStr,
-                                }));
-                            const updatedColors = [...p.brandKit.colors, ...newBrandColors].slice(0, 5);
-                            return { ...p, brandKit: { ...p.brandKit, colors: updatedColors }};
+                            const newColors: BrandColor[] = colors.map(c => ({ id: uuidv4(), role: 'Accent', value: c }));
+                            const existingColors = p.brandKit.colors.map(c => c.value);
+                            const uniqueNewColors = newColors.filter(c => !existingColors.includes(c.value));
+                            const combined = [...p.brandKit.colors, ...uniqueNewColors];
+                            const finalColors = combined.slice(0, 5); // Limit to 5 colors
+                            return { ...p, brandKit: { ...p.brandKit, colors: finalColors } };
                         });
-                        alert('이미지에서 추출된 색상이 브랜드 키트에 추가되었습니다.');
+                        alert(`이미지에서 색상을 추출하여 브랜드 키트에 추가했습니다: ${colors.join(', ')}`);
                     }
                     break;
             }
-        } catch (error) {
-            console.error('AI Action Failed:', error);
-            setError(getApiErrorMessage(error, 'AI 작업'));
+        } catch (err) {
+            setError(getApiErrorMessage(err));
         } finally {
             setIsProcessingAiAction(null);
         }
-    }, [page, projectData, updateProjectData, onPageUpdate, handleLayerUpdate, setError]);
-
-    const handleContextMenuAiAction = (actionType: 'removeBackground' | 'suggestFont') => {
-        if (selectedLayerIds.length !== 1) return;
-        const layerId = selectedLayerIds[0];
-        const layer = allLayers.find(l => l.id === layerId);
-        if (!layer) return;
-    
-        if (actionType === 'removeBackground' && 'assetId' in layer) {
-            handleExecuteAiAction({ type: 'removeBackground', layerId });
-        } else if (actionType === 'suggestFont' && 'content' in layer) {
-            handleExecuteAiAction({ type: 'suggestFont', layerId });
-        }
-    };
-
-    const handleExecuteMagicWand = async (prompt: string) => {
-        if (!magicWandState) return;
-        
-        setIsProcessingMagicWand(true);
-        setError(null);
-        try {
-            const targetLayers = allLayers.filter(l => magicWandState.targetLayerIds.includes(l.id));
-            const newLayout = await executeMagicWandAction(page, projectData, targetLayers, magicWandState.position, prompt);
-            onPageUpdate(page.id, newLayout);
-        } catch (error) {
-            console.error('Magic Wand execution failed', error);
-            setError(getApiErrorMessage(error, 'AI 매직 완드 작업'));
-        } finally {
-            setIsProcessingMagicWand(false);
-            setMagicWandState(null);
-        }
-    };
-
-    const handleExecuteAiExpand = async (prompt: string) => {
-        if (!expandState) return;
-        const { layerId } = expandState;
-        
-        setIsProcessingAiAction(`expand-${layerId}`);
-        setExpandState(null);
-        setError(null);
-
-        try {
-            const layer = page.imageLayers.find(l => l.id === layerId);
-            const asset = layer ? projectData.imageLibrary.find(a => a.id === layer.assetId) : null;
-            if (!layer || !asset) throw new Error("Image layer or asset not found for expansion.");
-
-            const base64 = await new Promise<string>((res, rej) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(asset.file);
-                reader.onload = () => res((reader.result as string).split(',')[1]);
-                reader.onerror = rej;
-            });
-
-            const newBase64 = await expandImageWithAI(base64, asset.file.type, layer.width, layer.height, prompt);
-            
-            const dataUrl = `data:image/png;base64,${newBase64}`;
-            const newFile = dataURLtoFile(dataUrl, `expanded_${asset.file.name}`);
-            const image = new Image();
-            image.src = dataUrl;
-            await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
-            const newAsset: ImageAsset = {
-                id: uuidv4(),
-                file: newFile,
-                previewUrl: URL.createObjectURL(newFile),
-                width: image.naturalWidth,
-                height: image.naturalHeight
-            };
-            
-            updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, newAsset]}));
-            handleLayerUpdate(layerId, { assetId: newAsset.id });
-
-        } catch (error) {
-            console.error('AI Expand execution failed', error);
-            setError(getApiErrorMessage(error, 'AI 이미지 확장'));
-        } finally {
-            setIsProcessingAiAction(null);
-        }
-    };
-    
-    const handleBulkGenerate = (data: Record<string, string>[], mapping: DataMapping) => {
-        const templatePage = page;
-        const newPages: DesignPage[] = data.map((row, index) => {
-            let newPage = JSON.parse(JSON.stringify(templatePage)); // Deep copy
-            newPage.id = uuidv4();
-            newPage.pageNumber = index + 1;
-            newPage.textLayers = newPage.textLayers.map((layer: TextLayer) => {
-                const mappedHeader = mapping[layer.id];
-                if (mappedHeader && row[mappedHeader]) {
-                    return { ...layer, content: row[mappedHeader] };
-                }
-                return layer;
-            });
-            return newPage;
-        });
-
-        const newDocument: DesignDocument = {
-            id: uuidv4(),
-            name: `${templatePage.type} (대량 생성됨)`,
-            pages: newPages,
-        };
-
-        updateProjectData(p => ({
-            ...p,
-            documents: [newDocument, ...p.documents],
-        }));
-
-        setIsDataDrivenModalOpen(false);
-        onDocumentCreationCloseEditor(); // Navigate home
-    };
-    
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-             const target = e.target as HTMLElement;
-             if (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
-            switch(e.key) {
-                case 'Delete': case 'Backspace': deleteSelectedLayers(); break;
-                case 'c': if(e.metaKey || e.ctrlKey) handleCopy(); break;
-                case 'v': if(e.metaKey || e.ctrlKey) handlePaste(); break;
-                case 'g': if(e.metaKey || e.ctrlKey) { e.preventDefault(); handleGroup(); } break;
-                case 'G': if(e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); handleUngroup(); } break;
-            }
-        };
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [deleteSelectedLayers, handleCopy, handlePaste, handleGroup, handleUngroup]);
-
+    }, [page, projectData, updateProjectData, onPageUpdate, handleLayerUpdate, onDocumentCreationCloseEditor, setRemixSuggestions, setError]);
 
     return (
-        <div className="w-full h-full flex flex-col bg-slate-200 overflow-hidden">
-            <div className="flex flex-grow overflow-hidden">
-                <Toolbar activeTool={activeTool} setActiveTool={setActiveTool} />
-                <LeftPanel
-                    projectData={projectData}
-                    addLayer={addLayer}
-                    updateProjectData={updateProjectData}
-                    allLayers={allVisibleLayers}
-                    selectedLayerIds={selectedLayerIds}
-                    setSelectedLayerIds={setSelectedLayerIds}
-                    handleLayerUpdate={handleLayerUpdate}
-                    forceAiAssistant={forceAiAssistant}
-                    onAiAssistantClose={onAiAssistantClose}
-                    editingDocumentId={editingDocument.id}
-                    onStartGeneration={onStartGeneration}
-                    onOpenDataDrivenModal={() => setIsDataDrivenModalOpen(true)}
-                    onStartWizard={onStartWizard}
-                />
+        <div className="h-full w-full flex bg-slate-50">
+            <Toolbar activeTool={activeTool} setActiveTool={tool => {
+                if (tool === 'eyedropper') activateEyedropper(() => {}); // Activate generic eyedropper
+                else setActiveTool(tool);
+            }}/>
+            <LeftPanel 
+                projectData={projectData}
+                addLayer={addLayer}
+                updateProjectData={updateProjectData}
+                onDeleteAsset={onDeleteAsset}
+                allLayers={allVisibleLayers}
+                selectedLayerIds={selectedLayerIds}
+                setSelectedLayerIds={setSelectedLayerIds}
+                handleLayerUpdate={handleLayerUpdate}
+                forceAiAssistant={forceAiAssistant}
+                onAiAssistantClose={onAiAssistantClose}
+                editingDocumentId={editingDocument.id}
+                onStartGeneration={onStartGeneration}
+                onOpenDataDrivenModal={() => setIsDataDrivenModalOpen(true)}
+                onStartWizard={onStartWizard}
+            />
+            <div className="flex-grow flex flex-col relative">
                 <Canvas
                     page={page}
                     allLayers={allLayers}
@@ -703,61 +694,81 @@ export const Editor: React.FC<EditorProps> = (props) => {
                     onGroup={handleGroup}
                     onUngroup={handleUngroup}
                     onPageUpdate={onPageUpdate}
-                    onAiAction={handleContextMenuAiAction}
+                    onAiAction={(type) => handleExecuteAiAction({type, layerId: selectedLayerIds[0]})}
                     isEyedropperActive={activeTool === 'eyedropper' || !!eyedropperState}
                     onColorPick={handleColorPick}
                     magicWandState={magicWandState}
                     setMagicWandState={setMagicWandState}
-                    onExecuteMagicWand={handleExecuteMagicWand}
+                    onExecuteMagicWand={async (prompt: string) => {
+                        setIsProcessingMagicWand(true);
+                        try {
+                            const targetLayers = allLayers.filter(l => magicWandState?.targetLayerIds.includes(l.id));
+                            const newLayout = await executeMagicWandAction(page, projectData, targetLayers, magicWandState!.position, prompt);
+                            onPageUpdate(page.id, newLayout);
+                        } catch (err) {
+                            setError(getApiErrorMessage(err));
+                        } finally {
+                            setIsProcessingMagicWand(false);
+                            setMagicWandState(null);
+                        }
+                    }}
                     isProcessingMagicWand={isProcessingMagicWand}
                     processingAiActionLayerId={isProcessingAiAction}
-                    onAiExpand={(layerId, event) => setExpandState({ layerId, x: event.clientX, y: event.clientY })}
+                    onAiExpand={handleAiExpand}
                 />
-                <InspectorPanel
-                    page={page}
-                    onPageUpdate={onPageUpdate}
-                    selectedLayers={selectedLayers}
-                    handleLayerUpdate={handleLayerUpdate}
-                    handleMultipleLayerUpdate={handleMultipleLayerUpdate}
-                    deleteSelectedLayers={deleteSelectedLayers}
-                    handleLayerOrderChange={handleLayerOrderChange}
-                    onGroup={handleGroup}
-                    onUngroup={handleUngroup}
-                    onActivateEyedropper={activateEyedropper}
-                    onExecuteAiAction={handleExecuteAiAction}
-                    isProcessingAiAction={isProcessingAiAction}
+                <PageNavigator
+                    pages={editingDocument.pages}
+                    activePageIndex={activePageIndex}
+                    onSelectPage={onSelectPage}
+                    onAddPage={onAddPage}
+                    onDeletePage={onDeletePage}
                 />
             </div>
-            <PageNavigator
-                pages={editingDocument.pages}
-                activePageIndex={activePageIndex}
-                onSelectPage={onSelectPage}
-                onAddPage={onAddPage}
-                onDeletePage={onDeletePage}
+            <InspectorPanel
+                page={page}
+                onPageUpdate={onPageUpdate}
+                selectedLayers={allVisibleLayers.filter(l => selectedLayerIds.includes(l.id))}
+                handleLayerUpdate={handleLayerUpdate}
+                handleMultipleLayerUpdate={handleMultipleLayerUpdate}
+                deleteSelectedLayers={deleteSelectedLayers}
+                handleLayerOrderChange={handleLayerOrderChange}
+                onGroup={handleGroup}
+                onUngroup={handleUngroup}
+                onActivateEyedropper={activateEyedropper}
+                onExecuteAiAction={handleExecuteAiAction}
+                isProcessingAiAction={isProcessingAiAction}
             />
-            {aiGenerationState.visible && (
-                <AiGenerateModal
-                    onClose={() => setAiGenerationState({ rect: null, visible: false })}
-                    onGenerate={handleAiGenerate}
+            {aiGenerationState.visible && <AiGenerateModal onClose={() => setAiGenerationState({ rect: null, visible: false })} onGenerate={handleAiGenerate} />}
+            {isDataDrivenModalOpen && 
+                <DataDrivenModal 
+                    isOpen={isDataDrivenModalOpen} 
+                    onClose={() => setIsDataDrivenModalOpen(false)} 
+                    templatePage={page} 
+                    onGenerate={handleDataDrivenGenerate}
                 />
-            )}
-            {isDataDrivenModalOpen && (
-                <DataDrivenModal
-                    isOpen={isDataDrivenModalOpen}
-                    onClose={() => setIsDataDrivenModalOpen(false)}
-                    templatePage={page}
-                    onGenerate={handleBulkGenerate}
-                />
-            )}
+            }
             {expandState && (
-                 <AiMagicWandInput
+                <AiMagicWandInput
                     x={expandState.x}
                     y={expandState.y}
-                    onSubmit={handleExecuteAiExpand}
+                    onSubmit={handleExecuteExpand}
                     onClose={() => setExpandState(null)}
-                    isProcessing={!!isProcessingAiAction}
-                    placeholder="확장할 이미지에 대한 설명 (예: 하늘을 더 넓게)"
-                 />
+                    isProcessing={!!isProcessingAiAction && isProcessingAiAction.startsWith('expand-')}
+                    placeholder="어떻게 확장할까요? 예: 푸른 하늘과 구름"
+                />
+            )}
+            {remixSuggestions && (
+                <RemixSuggestionsModal
+                    isOpen={!!remixSuggestions}
+                    onClose={() => setRemixSuggestions(null)}
+                    suggestions={remixSuggestions}
+                    originalPage={page}
+                    assetUrlMap={assetUrlMap}
+                    onSelect={(suggestion) => {
+                        onPageUpdate(page.id, suggestion);
+                        setRemixSuggestions(null);
+                    }}
+                />
             )}
         </div>
     );

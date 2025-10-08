@@ -67,8 +67,8 @@ export const LayerComponent: React.FC<LayerComponentProps> = ({
                 value={layer.content} 
                 onChange={(e) => onTextChange(e.target.value)} 
                 onBlur={onTextBlur}
-                className="p-0 resize-none m-0 bg-transparent w-full h-full border focus:outline-none focus:ring-1 focus:ring-blue-500"
-                style={{...textStyle, caretColor: layer.color}}
+                className="p-0 resize-none m-0 bg-transparent w-full h-full border-2 border-blue-500 focus:outline-none"
+                style={{...textStyle, caretColor: 'black'}}
                 autoFocus
             />;
         } else {

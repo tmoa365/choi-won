@@ -1,16 +1,21 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { DesignBrief, DesignProject, ImageAsset, DesignDocument, DesignPage, DesignType, GenerationOption, BrandLogo, BrandColor, BrandFont } from './types';
-import { XCircleIcon } from './components/icons';
+import { XCircleIcon, UploadIcon } from './components/icons';
 import { DesignBriefForm } from './components/DesignBriefForm';
 import { HistoryView } from './components/InfoHub';
 import { KOREAN_FONTS_LIST } from './components/fonts';
-import { dataURLtoFile, fileToDataURL, mmToPx } from './vicEdit/utils';
+import { dataURLtoFile, fileToDataURL, mmToPx, renderPdfToPngDataURL, getBase64FromDataUrl, getApiErrorMessage } from './vicEdit/utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Editor } from './vicEdit/Editor';
 import { Header } from './components/Header';
 import { useHistoryState } from './vicEdit/hooks';
 import { GenerationView } from './components/OutputDisplay';
 import { GenerationWizardModal } from './components/GenerationWizardModal';
+import { SeasonalGreetingWizardModal } from './components/SeasonalGreetingWizardModal';
+import { PostUploadActionModal } from './components/PostUploadActionModal';
+import { ImageScanModal } from './components/ImageScanModal';
+import { scanDesignFromImage } from './services';
+import { TemplateView } from './components/TemplateView';
 
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -127,6 +132,12 @@ const migrateProjectData = (data: any): DesignProject => {
             } else if (!layer.fill) {
                 layer.fill = '#6366f1'; // a default
             }
+            if (typeof layer.fill === 'object' && layer.fill.stops) {
+                layer.fill.stops = layer.fill.stops.map((stop: any) => ({
+                    ...stop,
+                    id: stop.id || uuidv4(),
+                }));
+            }
             return layer;
         }
         if (!doc.pages) doc.pages = [];
@@ -157,7 +168,7 @@ export function App() {
         newProjectData.documents.forEach(doc => {
             doc.pages.forEach(page => {
                 if (!page.base64 || page.base64.length < 100) {
-                     page.base64 = colorTo1x1PngDataURL('#F0F0F0').split(',')[1];
+                     page.base64 = getBase64FromDataUrl(colorTo1x1PngDataURL('#F0F0F0'));
                 }
             });
         });
@@ -180,15 +191,24 @@ export function App() {
   const [currentView, setCurrentView] = useState<'history' | 'editor' | 'generation'>('history');
   const [generationContext, setGenerationContext] = useState<GenerationOption | null>(null);
   const [wizardState, setWizardState] = useState<{isOpen: boolean; initialIdea: string; designType?: GenerationOption | null}>({isOpen: false, initialIdea: '', designType: null});
+  const [isSeasonalWizardOpen, setIsSeasonalWizardOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const debouncedProjectData = useDebounce(projectData, 1000);
 
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [assetsForPostUpload, setAssetsForPostUpload] = useState<ImageAsset[]>([]);
+  const [assetToScan, setAssetToScan] = useState<ImageAsset | null>(null);
+
+  const isInitialMount = useRef(true);
   useEffect(() => {
-    if (projectData !== initialProjectState) {
-        setSaveStatus('saving');
+    if (isInitialMount.current) {
+        isInitialMount.current = false;
+        return;
     }
-  }, [projectData, initialProjectState]);
+    setSaveStatus('saving');
+  }, [projectData]);
 
   useEffect(() => {
     if (saveStatus === 'saving') {
@@ -251,7 +271,7 @@ export function App() {
             type: activePage.type,
             width_mm: activePage.width_mm,
             height_mm: activePage.height_mm,
-            base64: colorTo1x1PngDataURL('#F0F0F0').split(',')[1],
+            base64: getBase64FromDataUrl(colorTo1x1PngDataURL('#F0F0F0')),
             textLayers: [], imageLayers: [], shapeLayers: [],
             pageNumber: editingDocument.pages.length + 1,
             hGuides: [], vGuides: [],
@@ -276,7 +296,7 @@ export function App() {
         const newPage: DesignPage = {
             id: uuidv4(),
             type: type,
-            base64: colorTo1x1PngDataURL('#F0F0F0').split(',')[1],
+            base64: getBase64FromDataUrl(colorTo1x1PngDataURL('#F0F0F0')),
             textLayers: [],
             imageLayers: [],
             shapeLayers: [],
@@ -304,49 +324,115 @@ export function App() {
         handleOpenEditor(newDocument.id);
     }, [updateProjectData]);
 
+    const handleSelectTemplate = (templateProject: DesignProject) => {
+        const templateDoc = templateProject.documents[0];
+        const newDoc: DesignDocument = {
+            ...JSON.parse(JSON.stringify(templateDoc)), // Deep copy
+            id: uuidv4(),
+            name: `사본: ${templateDoc.name}`,
+        };
+        updateProjectData(p => ({ ...p, documents: [newDoc, ...p.documents], designBrief: templateProject.designBrief }));
+        handleOpenEditor(newDoc.id);
+        setIsTemplateModalOpen(false);
+    };
+
   useEffect(() => {
     const processFiles = async (files: FileList) => {
-        const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-        if (imageFiles.length > 0) {
-            const newAssetsPromises: Promise<ImageAsset>[] = imageFiles.map(async file => {
-                const previewUrl = URL.createObjectURL(file);
-                const image = new Image();
-                image.src = previewUrl;
-                await new Promise((resolve, reject) => {
-                    image.onload = resolve;
-                    image.onerror = reject;
-                });
-                return {
-                    id: uuidv4(),
-                    file,
-                    previewUrl,
-                    width: image.naturalWidth,
-                    height: image.naturalHeight
-                };
+        const fileArray = Array.from(files);
+        
+        if (fileArray.length > 0) {
+            const newAssetsPromises: Promise<ImageAsset | null>[] = fileArray.map(async (file): Promise<ImageAsset | null> => {
+                try {
+                    let previewUrl: string;
+                    let processedFile = file;
+
+                    if (file.type.startsWith('image/')) {
+                        previewUrl = URL.createObjectURL(file);
+                    } else if (file.type === 'application/pdf') {
+                        previewUrl = await renderPdfToPngDataURL(file);
+                        processedFile = dataURLtoFile(previewUrl, file.name.replace(/\.pdf$/i, '.png'));
+                        previewUrl = URL.createObjectURL(processedFile);
+                    } else {
+                        console.warn('Unsupported file type:', file.type);
+                        return null;
+                    }
+
+                    const image = new Image();
+                    image.src = previewUrl;
+                    await new Promise((resolve, reject) => {
+                        image.onload = resolve;
+                        image.onerror = reject;
+                    });
+                    
+                    return {
+                        id: uuidv4(),
+                        file: processedFile,
+                        previewUrl: image.src,
+                        width: image.naturalWidth,
+                        height: image.naturalHeight
+                    };
+                } catch (error) {
+                    console.error("Error processing file:", file.name, error);
+                    setError(`'${file.name}' 파일 처리 중 오류 발생`);
+                    return null;
+                }
             });
-            const newAssets = await Promise.all(newAssetsPromises);
-            updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, ...newAssets] }));
+
+            const newAssets = (await Promise.all(newAssetsPromises)).filter((asset): asset is ImageAsset => asset !== null);
+            if(newAssets.length > 0) {
+                const isProjectEmpty = projectData.documents.length === 0;
+
+                if (isProjectEmpty) {
+                    // If project is empty, trigger scan flow with the first image
+                    setAssetToScan(newAssets[0]);
+                    // Add all assets to the library so they are not lost if the user cancels
+                    updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, ...newAssets] }));
+                } else {
+                    // Original logic for non-empty project
+                    updateProjectData(p => ({ ...p, imageLibrary: [...p.imageLibrary, ...newAssets] }));
+                    const jpegAssets = newAssets.filter(a => a.file.type === 'image/jpeg');
+                    if (jpegAssets.length > 0) {
+                        setAssetsForPostUpload(current => [...current, ...jpegAssets]);
+                    }
+                }
+            }
         }
     };
     const handlePaste = (event: ClipboardEvent) => {
         const target = event.target as HTMLElement;
         if (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
-        if (event.clipboardData?.files.length) processFiles(event.clipboardData.files);
+        if (event.clipboardData?.files.length) {
+            event.preventDefault();
+            processFiles(event.clipboardData.files);
+        }
     };
     const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        if (event.dataTransfer?.files.length) processFiles(event.dataTransfer.files);
+        setIsDraggingOver(false);
+        if (event.dataTransfer?.files.length) {
+            processFiles(event.dataTransfer.files);
+        }
     };
-    const handleDragOver = (event: DragEvent) => event.preventDefault();
+    const handleDragOver = (event: DragEvent) => {
+        event.preventDefault();
+        setIsDraggingOver(true);
+    };
+    const handleDragLeave = (event: DragEvent) => {
+        if (!event.relatedTarget || (event.relatedTarget as Node).nodeName === "HTML") {
+            setIsDraggingOver(false);
+        }
+    };
     document.addEventListener('paste', handlePaste);
     document.addEventListener('drop', handleDrop);
     document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('dragleave', handleDragLeave);
     return () => {
         document.removeEventListener('paste', handlePaste);
         document.removeEventListener('drop', handleDrop);
         document.removeEventListener('dragover', handleDragOver);
+        document.removeEventListener('dragleave', handleDragLeave);
     };
-  }, [updateProjectData]);
+  }, [updateProjectData, setError, projectData.documents.length]);
 
   const handleReset = () => {
     if (window.confirm("정말로 모든 입력 데이터와 생성된 이미지를 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) {
@@ -469,6 +555,39 @@ export function App() {
     const handleStartWizardWithType = (type: GenerationOption) => {
         setWizardState({ isOpen: true, initialIdea: '', designType: type });
     };
+    
+    const handleStartSeasonalWizard = () => {
+        setIsSeasonalWizardOpen(true);
+    };
+
+    const handleDeleteAsset = (assetId: string) => {
+        updateProjectData(p => {
+            const assetToDelete = p.imageLibrary.find(asset => asset.id === assetId);
+            if (assetToDelete) {
+                URL.revokeObjectURL(assetToDelete.previewUrl);
+            }
+            return { ...p, imageLibrary: p.imageLibrary.filter(asset => asset.id !== assetId) };
+        });
+    };
+    
+    const handleScanAndCreate = async (asset: ImageAsset, designType: DesignType) => {
+        try {
+            const base64 = await fileToDataURL(asset.file).then(getBase64FromDataUrl);
+            const newDocument = await scanDesignFromImage(base64, designType, projectData);
+            
+            updateProjectData(p => ({
+                ...p,
+                documents: [newDocument, ...p.documents],
+            }));
+
+            handleOpenEditor(newDocument.id);
+            setAssetToScan(null); // Close modal on success
+        } catch (err) {
+            setError(getApiErrorMessage(err, 'AI 디자인 스캔'));
+            throw err; // Re-throw for the modal to catch
+        }
+    };
+
 
   return (
     <div className="h-screen w-screen bg-slate-100 flex flex-col font-sans">
@@ -477,7 +596,9 @@ export function App() {
             onNavigateHome={() => setEditingDocumentId(null)}
             onCreateNewDesign={handleCreateNewDesign}
             onStartWizardWithType={handleStartWizardWithType}
+            onStartSeasonalWizard={handleStartSeasonalWizard}
             onOpenBrief={() => setIsBriefModalOpen(true)}
+            onOpenTemplates={() => setIsTemplateModalOpen(true)}
             onTriggerImport={triggerImport}
             onExport={handleExport}
             onReset={handleReset}
@@ -488,6 +609,14 @@ export function App() {
             saveStatus={saveStatus}
         />
       <main className="flex-grow relative overflow-hidden">
+        {isDraggingOver && (
+            <div className="fixed inset-0 bg-indigo-500/30 backdrop-blur-sm z-[100] flex items-center justify-center pointer-events-none">
+                <div className="p-12 border-4 border-dashed border-white rounded-2xl text-center">
+                    <UploadIcon className="w-24 h-24 text-white mx-auto"/>
+                    <p className="mt-4 text-2xl font-bold text-white">여기에 파일을 드롭하세요</p>
+                </div>
+            </div>
+        )}
         {error && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg z-50 shadow-lg" role="alert">
             <strong className="font-bold">오류: </strong>
@@ -516,6 +645,7 @@ export function App() {
             onDeletePage={handleDeletePage}
             projectData={projectData}
             updateProjectData={updateProjectData}
+            onDeleteAsset={handleDeleteAsset}
             forceAiAssistant={forceAiAssistant}
             onAiAssistantClose={() => setForceAiAssistant(false)}
             onStartGeneration={handleStartGeneration}
@@ -563,6 +693,58 @@ export function App() {
         />
       )}
       
+      {isSeasonalWizardOpen && (
+        <SeasonalGreetingWizardModal
+            projectData={projectData}
+            onClose={() => setIsSeasonalWizardOpen(false)}
+            onDesignCreated={(newDoc, newBrief) => {
+                updateProjectData(p => ({...p, designBrief: newBrief, documents: [newDoc, ...p.documents] }));
+                setEditingDocumentId(newDoc.id);
+                setCurrentView('editor');
+                setIsSeasonalWizardOpen(false);
+            }}
+            setError={setError}
+        />
+      )}
+      
+      {assetsForPostUpload.length > 0 && (
+        <PostUploadActionModal
+            assets={assetsForPostUpload}
+            onClose={() => setAssetsForPostUpload(assets => assets.slice(1))}
+            onUpdate={(assetId, updatedFile) => {
+                updateProjectData(p => {
+                    const newLibrary = p.imageLibrary.map(a => {
+                        if (a.id === assetId) {
+                            URL.revokeObjectURL(a.previewUrl);
+                            return { ...a, file: updatedFile, previewUrl: URL.createObjectURL(updatedFile) };
+                        }
+                        return a;
+                    });
+                    return { ...p, imageLibrary: newLibrary };
+                });
+                setAssetsForPostUpload(assets => assets.slice(1));
+            }}
+            setError={setError}
+        />
+      )}
+
+      {assetToScan && (
+        <ImageScanModal
+            asset={assetToScan}
+            onClose={() => setAssetToScan(null)}
+            onScan={handleScanAndCreate}
+            setError={setError}
+        />
+      )}
+
+      {isTemplateModalOpen && (
+        <TemplateView
+            isOpen={isTemplateModalOpen}
+            onClose={() => setIsTemplateModalOpen(false)}
+            onSelectTemplate={handleSelectTemplate}
+        />
+      )}
+
       <input type="file" ref={importFileRef} onChange={handleImport} className="hidden" accept="application/json"/>
     </div>
   );

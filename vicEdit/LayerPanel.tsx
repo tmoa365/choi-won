@@ -46,11 +46,9 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ layers, selectedLayerIds
     const reversedLayers = [...layers].reverse();
     
     const handleLayerClick = (e: React.MouseEvent, id: string) => {
-        if(e.shiftKey) {
-            onSelectLayer(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
-        } else {
-            onSelectLayer([id]);
-        }
+        // Per user request, only allow single selection in the layer panel.
+        // Multi-select via Shift+Click on canvas is still available for grouping.
+        onSelectLayer([id]);
     };
     
     const handleNameDoubleClick = (layer: AllLayer) => {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { DesignDocument } from '../types';
 import { Card, CardHeader } from './ui';
-import { HistoryIcon, PageIcon, SparklesIcon } from './icons';
+import { HistoryIcon, PageIcon, SparklesIcon, UploadIcon } from './icons';
 
 interface HistoryViewProps {
     documents: DesignDocument[];
@@ -21,9 +21,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
 
                 {documents.length === 0 ? (
-                     <div className="flex flex-col items-center justify-center h-64 bg-slate-50 rounded-lg mt-4">
-                        <SparklesIcon className="w-12 h-12 text-slate-400" />
-                        <p className="mt-4 text-slate-600 font-semibold">새로운 디자인을 만들어보세요!</p>
+                     <div className="flex flex-col items-center justify-center h-96 bg-slate-100 rounded-lg mt-4 border-4 border-dashed border-slate-300 transition-colors">
+                        <UploadIcon className="w-16 h-16 text-slate-400" />
+                        <p className="mt-4 text-slate-600 font-bold text-xl">이미지를 여기에 드롭하거나 붙여넣으세요</p>
+                        <p className="mt-2 text-slate-500">AI가 이미지를 분석하여 새로운 디자인을 시작합니다.</p>
                     </div>
                 ) : (
                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">

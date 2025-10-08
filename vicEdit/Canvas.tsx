@@ -1,5 +1,5 @@
 import React, { useRef, useLayoutEffect, useState, MouseEvent, useEffect, useMemo, useCallback } from 'react';
-import { DesignPage, TextLayer, ImageLayer, ShapeLayer, DesignProject } from '../types';
+import { DesignPage, TextLayer, ImageLayer, ShapeLayer, DesignProject, DesignType } from '../types';
 import { LayerComponent } from './LayerComponent';
 import { mmToPx, ptToPx, rgbToHex } from './utils';
 import { AllLayer, MagicWandState, Interaction } from '../types';
@@ -66,6 +66,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, target: ContextMenuTarget } | null>(null);
     const [isDraggingGuide, setIsDraggingGuide] = useState<{ type: 'h' | 'v', index: number } | null>(null);
     const guideDragStart = useRef(0);
+    const [ephemeralLayers, setEphemeralLayers] = useState<AllLayer[] | null>(null);
 
     const canvasWidth = useMemo(() => page.width_mm ? mmToPx(page.width_mm) : mmToPx(420), [page.width_mm]);
     const canvasHeight = useMemo(() => page.height_mm ? mmToPx(page.height_mm) : mmToPx(594), [page.height_mm]);
@@ -113,10 +114,43 @@ export const Canvas: React.FC<CanvasProps> = ({
         setInteraction({ type, handle, startX: x, startY: y, initialLayers: [layer], layerCenter, initialAngle: layer.rotation });
     };
 
-    const handleCanvasMouseDown = (e: MouseEvent) => {
+    const handleCanvasMouseDown = async (e: MouseEvent) => {
         setEditingLayerId(null);
         if (e.button !== 0) return; // Only left click
 
+        if (isEyedropperActive) {
+            if (!canvasRef.current) return;
+            try {
+                // Temporarily remove outlines to avoid picking their color
+                const selectedElements = canvasRef.current.querySelectorAll('.outline');
+                selectedElements.forEach(el => el.classList.remove('outline', 'outline-2', 'outline-blue-500'));
+
+                const capturedCanvas = await window.html2canvas(canvasRef.current, {
+                    useCORS: true,
+                    backgroundColor: null,
+                    scale: 1, // Capture at native resolution, ignoring CSS transform
+                });
+                
+                // Restore outlines
+                selectedElements.forEach(el => el.classList.add('outline', 'outline-2', 'outline-blue-500'));
+
+                const { x: scaledX, y: scaledY } = getMousePos(e);
+                const realX = scaledX / zoom;
+                const realY = scaledY / zoom;
+
+                const ctx = capturedCanvas.getContext('2d');
+                if (!ctx) return;
+                
+                const p = ctx.getImageData(realX, realY, 1, 1).data;
+                const hex = rgbToHex(p[0], p[1], p[2]);
+                onColorPick(hex);
+
+            } catch (error) {
+                console.error("Eyedropper failed:", error);
+            }
+            return; // Prevent other mousedown logic after picking color
+        }
+        
         const target = e.target as HTMLElement;
         const isGuide = target.dataset.guideType;
         if(isGuide) return;
@@ -132,23 +166,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (e.buttons === 4 || e.buttons === 2 || (e.buttons === 1 && e.altKey)) { // Middle mouse or right click or alt+left
             setIsPanning(true);
         }
-
-        if (isEyedropperActive) {
-            const { x, y } = getMousePos(e);
-            const canvasEl = document.createElement('canvas');
-            const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
-            if (!ctx || !containerRef.current) return;
-            
-            // This is a simplified approach. A full solution would use html2canvas or similar.
-            const p = ctx.getImageData(x*zoom, y*zoom, 1, 1).data;
-            const hex = rgbToHex(p[0], p[1], p[2]);
-            onColorPick(hex);
-        }
     };
     
     const handleMouseUp = (e: MouseEvent) => {
         e.stopPropagation();
+        
+        if (interaction && ephemeralLayers) {
+            const updates = ephemeralLayers.map(l => ({
+                id: l.id,
+                changes: {
+                    left: l.left,
+                    top: l.top,
+                    width: l.width,
+                    height: l.height,
+                    rotation: l.rotation,
+                }
+            }));
+            handleMultipleLayerUpdate(updates);
+        }
+
         setInteraction(null);
+        setEphemeralLayers(null);
         setIsPanning(false);
         isMultiSelecting.current = false;
         if(selectionBox) {
@@ -211,43 +249,48 @@ export const Canvas: React.FC<CanvasProps> = ({
         const dx = (x - startX);
         const dy = (y - startY);
 
-        if (type === 'move') {
-            const updates = initialLayers.map(l => ({ id: l.id, changes: { left: l.left + dx, top: l.top + dy }}));
-            handleMultipleLayerUpdate(updates);
-        } else {
-             const layer = initialLayers[0];
-             if (type === 'resize' && interaction.handle) {
-                 let newWidth = layer.width;
-                 let newHeight = layer.height;
-                 let newLeft = layer.left;
-                 let newTop = layer.top;
-                 
-                 const aspectRatio = layer.width / layer.height;
+        const updatedEphemeralLayers = initialLayers.map(layer => {
+            let newLayer = { ...layer };
+            if (type === 'move') {
+                newLayer.left = layer.left + dx;
+                newLayer.top = layer.top + dy;
+            } else if (type === 'resize' && interaction.handle) {
+                let newWidth = layer.width;
+                let newHeight = layer.height;
+                let newLeft = layer.left;
+                let newTop = layer.top;
+                
+                const aspectRatio = layer.width / layer.height;
 
-                 if (interaction.handle.includes('r')) newWidth = layer.width + dx;
-                 if (interaction.handle.includes('l')) { newWidth = layer.width - dx; newLeft = layer.left + dx; }
-                 if (interaction.handle.includes('b')) newHeight = layer.height + dy;
-                 if (interaction.handle.includes('t')) { newHeight = layer.height - dy; newTop = layer.top + dy; }
-                 
-                 if (e.shiftKey && 'assetId' in layer) { // Maintain aspect ratio for images
-                     if (interaction.handle.includes('r') || interaction.handle.includes('l')) {
+                if (interaction.handle.includes('r')) newWidth = layer.width + dx;
+                if (interaction.handle.includes('l')) { newWidth = layer.width - dx; newLeft = layer.left + dx; }
+                if (interaction.handle.includes('b')) newHeight = layer.height + dy;
+                if (interaction.handle.includes('t')) { newHeight = layer.height - dy; newTop = layer.top + dy; }
+                
+                if (e.shiftKey && ('assetId' in layer || 'type' in layer)) { // aspect ratio for images and shapes
+                    if (interaction.handle.includes('r') || interaction.handle.includes('l')) {
                         newHeight = newWidth / aspectRatio;
-                     } else {
+                    } else {
                         newWidth = newHeight * aspectRatio;
-                     }
-                     if (interaction.handle.includes('t')) newTop = layer.top + layer.height - newHeight;
-                     if (interaction.handle.includes('l')) newLeft = layer.left + layer.width - newWidth;
-                 }
-                 
-                 handleLayerUpdate(layer.id, { width: Math.max(20, newWidth), height: Math.max(20, newHeight), left: newLeft, top: newTop });
-             } else if (type === 'rotate' && interaction.layerCenter) {
-                 const angle = Math.atan2(y - interaction.layerCenter.y, x - interaction.layerCenter.x) * (180 / Math.PI);
-                 const startAngle = Math.atan2(startY - interaction.layerCenter.y, startX - interaction.layerCenter.x) * (180 / Math.PI);
-                 let newRotation = (interaction.initialAngle || 0) + (angle - startAngle);
-                 if (e.shiftKey) newRotation = Math.round(newRotation / 15) * 15;
-                 handleLayerUpdate(layer.id, { rotation: newRotation });
-             }
-        }
+                    }
+                    if (interaction.handle.includes('t')) newTop = layer.top + layer.height - newHeight;
+                    if (interaction.handle.includes('l')) newLeft = layer.left + layer.width - newWidth;
+                }
+                
+                newLayer.width = Math.max(20, newWidth);
+                newLayer.height = Math.max(20, newHeight);
+                newLayer.left = newLeft;
+                newLayer.top = newTop;
+            } else if (type === 'rotate' && interaction.layerCenter) {
+                const angle = Math.atan2(y - interaction.layerCenter.y, x - interaction.layerCenter.x) * (180 / Math.PI);
+                const startAngle = Math.atan2(startY - interaction.layerCenter.y, startX - interaction.layerCenter.x) * (180 / Math.PI);
+                let newRotation = (interaction.initialAngle || 0) + (angle - startAngle);
+                if (e.shiftKey) newRotation = Math.round(newRotation / 15) * 15;
+                newLayer.rotation = newRotation;
+            }
+            return newLayer;
+        });
+        setEphemeralLayers(updatedEphemeralLayers);
     };
     
     useEffect(() => {
@@ -305,6 +348,24 @@ export const Canvas: React.FC<CanvasProps> = ({
         setContextMenu({ x: e.clientX, y: e.clientY, target });
     }
 
+    const isBannerType = useMemo(() => [DesignType.Banner, DesignType.Placard, DesignType.WideBanner, DesignType.XBanner].includes(page.type), [page.type]);
+    const safeAreaInset = useMemo(() => {
+        if (!isBannerType) return 0;
+        if (page.type === DesignType.XBanner || page.type === DesignType.WideBanner) {
+            return mmToPx(30); // 3cm for smaller banners
+        }
+        return mmToPx(70); // 7cm for large banners
+    }, [isBannerType, page.type]);
+
+    const displayedLayers = useMemo(() => {
+        if (!ephemeralLayers) {
+            return allLayers;
+        }
+        const ephemeralLayerIds = new Set(ephemeralLayers.map(l => l.id));
+        const staticLayers = allLayers.filter(l => !ephemeralLayerIds.has(l.id));
+        return [...staticLayers, ...ephemeralLayers];
+    }, [allLayers, ephemeralLayers]);
+
     return (
         <div className="flex-grow flex flex-col bg-slate-300 relative overflow-hidden" ref={containerRef} onWheel={handleWheel}>
             <div className="flex-grow w-full h-full" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseDown={handleCanvasMouseDown}>
@@ -314,7 +375,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                         width: `${canvasWidth}px`, height: `${canvasHeight}px`,
                         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         transformOrigin: 'top left',
-                        cursor: isPanning ? 'grabbing' : activeTool === 'text' ? 'text' : activeTool === 'rectangle' ? 'crosshair' : activeTool === 'ai-generate' ? 'crosshair' : 'default',
+                        cursor: isPanning ? 'grabbing' : activeTool === 'text' ? 'text' : activeTool === 'rectangle' ? 'crosshair' : activeTool === 'ai-generate' ? 'crosshair' : isEyedropperActive ? 'crosshair' : 'default',
                     }}
                     onClick={handleCanvasClick}
                     onContextMenu={(e) => handleContextMenu(e, 'canvas')}
@@ -326,7 +387,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                             <path d={page.dieline.creasePath} stroke="cyan" strokeWidth="2" fill="none" strokeDasharray="5,5" />
                         </svg>
                     )}
-                    {allLayers.map(layer => (
+                    {displayedLayers.map(layer => (
                         <LayerComponent
                             key={layer.id}
                             layer={layer}
@@ -366,6 +427,20 @@ export const Canvas: React.FC<CanvasProps> = ({
                     {(page.vGuides || []).map((guide, i) => (
                         <div key={`v-guide-${i}`} data-guide-type="v" onMouseDown={(e) => { e.stopPropagation(); setIsDraggingGuide({ type: 'v', index: i }); guideDragStart.current = getMousePos(e).x; }} className="absolute w-px h-full bg-cyan-400 cursor-col-resize" style={{ left: guide, zIndex: 99 }} />
                     ))}
+                    {isBannerType && (
+                        <div 
+                            className="absolute inset-0 pointer-events-none border-dashed border-2 border-magenta-500"
+                            style={{
+                                left: safeAreaInset,
+                                top: safeAreaInset,
+                                right: safeAreaInset,
+                                bottom: safeAreaInset,
+                                boxSizing: 'border-box'
+                            }}
+                        >
+                            <div className="absolute -top-5 left-0 text-magenta-500 text-xs bg-white/70 px-1 rounded" style={{transform: `scale(${1/zoom})`, transformOrigin: 'top left'}}>안전 영역</div>
+                        </div>
+                    )}
                 </div>
                 {showRulers && (
                      <div className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, transformOrigin: 'top left' }}>
@@ -379,7 +454,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 )}
                  {isInitialBrief && (
                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="bg-slate-800/80 backdrop-blur-md p-12 rounded-2xl text-center max-w-xl shadow-xl border border-slate-700/50">
+                        <div className="bg-slate-900/60 backdrop-blur-xl p-16 rounded-3xl text-center max-w-2xl shadow-2xl border border-slate-700">
                             <SparklesIcon className="w-16 h-16 mx-auto text-yellow-400"/>
                             <h3 className="text-2xl font-bold mt-6 text-white">AI 디자인을 시작해 보세요!</h3>
                             <p className="mt-4 text-slate-300">왼쪽의 '프로젝트 브리핑' 패널에서 디자인 정보를 입력하여 AI 시안 생성을 시작하거나, 툴바의 도구를 사용하여 직접 디자인을 시작할 수 있습니다.</p>

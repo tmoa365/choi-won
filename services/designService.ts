@@ -2,10 +2,10 @@ import { GenerateContentResponse, Type, Modality } from "@google/genai";
 import { v4 as uuidv4 } from 'uuid';
 import { ai } from "./geminiClient";
 import { generateImage, editImageWithText } from "./imageService";
-import { DesignPage, DesignType, TextLayer, ImageLayer, ShapeLayer, DesignProject, DesignDocument, GenerationOption, AllLayer, BrandKit } from '../types';
+import { DesignPage, DesignType, TextLayer, ImageLayer, ShapeLayer, DesignProject, DesignDocument, GenerationOption, AllLayer, BrandKit, Group } from '../types';
 import { MATERIAL_DIMENSIONS, TONE_AND_MANNERS } from "../constants";
-import { mmToPx, ptToPx, fileToDataURL } from "../vicEdit/utils";
-import { BANNER_DESIGN_PRINCIPLES, BUSINESS_CARD_BACK_PRINCIPLES, BUSINESS_CARD_FRONT_PRINCIPLES } from "../components/designPrinciples";
+import { mmToPx, ptToPx, fileToDataURL, getBase64FromDataUrl } from "../vicEdit/utils";
+import { LARGE_BANNER_PRINCIPLES, WIDE_BANNER_PRINCIPLES, X_BANNER_PRINCIPLES, BUSINESS_CARD_BACK_PRINCIPLES, BUSINESS_CARD_FRONT_PRINCIPLES, FLYER_PRINCIPLES } from "../components/designPrinciples";
 import { KOREAN_FONTS_LIST } from "../components/fonts";
 
 const LAYOUT_SCHEMA = {
@@ -83,7 +83,32 @@ const LAYOUT_SCHEMA = {
     required: ['textLayers', 'imageLayers', 'shapeLayers']
 };
 
-const generateLayoutFromPrompt = async (prompt: string, imageBase64?: string): Promise<{ textLayers: TextLayer[]; imageLayers: ImageLayer[]; shapeLayers: ShapeLayer[] }> => {
+const REMIX_LAYOUT_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        layouts: {
+            type: Type.ARRAY,
+            description: "An array containing exactly 3 distinct layout variations.",
+            items: LAYOUT_SCHEMA,
+        }
+    },
+    required: ['layouts']
+};
+
+
+const DESIGN_TYPE_DETECTION_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        detectedType: {
+            type: Type.STRING,
+            description: "The most likely design type from the provided list.",
+            enum: Object.values(DesignType).filter(t => t !== DesignType.AutoDetect),
+        },
+    },
+    required: ['detectedType'],
+};
+
+const generateLayoutFromPrompt = async (prompt: string, imageBase64?: string, schema: any = LAYOUT_SCHEMA): Promise<any> => {
     try {
         const parts: ({ text: string; } | { inlineData: { mimeType: string; data: string; }; })[] = [{ text: prompt }];
         if (imageBase64) {
@@ -95,33 +120,23 @@ const generateLayoutFromPrompt = async (prompt: string, imageBase64?: string): P
             contents: { parts },
             config: {
                 responseMimeType: "application/json",
-                responseSchema: LAYOUT_SCHEMA,
+                responseSchema: schema,
             },
         });
 
         const jsonString = response.text.trim();
-        const jsonResponse = JSON.parse(jsonString);
-        
-        const ensureLayerDefaults = (layer: any) => ({
-            ...layer,
-            isVisible: true,
-            isLocked: false,
-        });
-        
-         const ensureTextDefaults = (layer: any) => ({
-            ...layer,
-            fontStyle: layer.fontStyle || 'normal',
-            textDecoration: layer.textDecoration || 'none'
-        });
-
-        return {
-            textLayers: (jsonResponse.textLayers || []).map(ensureLayerDefaults).map(ensureTextDefaults),
-            imageLayers: (jsonResponse.imageLayers || []).map(ensureLayerDefaults),
-            shapeLayers: (jsonResponse.shapeLayers || []).map(ensureLayerDefaults)
-        };
+        try {
+            return JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("JSON parsing error in generateLayoutFromPrompt. Raw response:", jsonString);
+            throw new Error("AI 응답이 잘못된 JSON 형식입니다.");
+        }
     } catch (error) {
         console.error('Error generating layout:', error);
-        throw error;
+        if (error instanceof Error && error.message.includes("JSON")) {
+            throw error;
+        }
+        throw new Error("레이아웃 생성에 실패했습니다.");
     }
 };
 
@@ -131,6 +146,7 @@ const getAspectRatio = (type: DesignType): '1:1' | '3:4' | '16:9' | '4:3' | '9:1
     if (Math.abs(ratio - 1) < 0.1) return '1:1';
     if (Math.abs(ratio - (9 / 16)) < 0.1) return '9:16';
     if (Math.abs(ratio - 0.75) < 0.1) return '3:4';
+    if (Math.abs(ratio - (4/5)) < 0.1) return '3:4'; // Close enough to 4:5
     if (Math.abs(ratio - 1.77) < 0.2) return '16:9'; 
     if (Math.abs(ratio - 1.33) < 0.1) return '4:3';
     if (ratio > 2) return '16:9';
@@ -220,6 +236,8 @@ ${brandPrompt}`;
         [DesignType.Banner]: basePrompt.replace('{type}', 'long horizontal banner'),
         [DesignType.Flyer]: basePrompt.replace('{type}', 'promotional A4 flyer'),
         [DesignType.Placard]: basePrompt.replace('{type}', 'large placard banner'),
+        [DesignType.WideBanner]: basePrompt.replace('{type}', 'very long and narrow horizontal banner'),
+        [DesignType.XBanner]: basePrompt.replace('{type}', 'tall and narrow vertical X-banner stand'),
         [DesignType.VColoring]: basePrompt.replace('{type}', 'vertical mobile screen for a V-Coloring service, focusing on a single strong visual element'),
         [DesignType.MobileBusinessCard]: basePrompt.replace('{type}', 'vertical mobile business card'),
         [DesignType.SeasonalGreeting]: basePrompt.replace('{type}', 'warm seasonal greeting image for mobile message'),
@@ -252,7 +270,7 @@ export const generateFullDesignPreviews = async (designType: DesignType, project
         const firstImageAsset = projectData.imageLibrary[0];
         const file = firstImageAsset.file;
         const dataUrl = await fileToDataURL(file);
-        const imageBase64 = dataUrl.split(',')[1];
+        const imageBase64 = getBase64FromDataUrl(dataUrl);
         
         const generationPromises = Array(numberOfImages).fill(0).map(() => 
             editImageWithText(imagePrompt, imageBase64)
@@ -267,6 +285,26 @@ export const generateFullDesignPreviews = async (designType: DesignType, project
         return results;
     }
 };
+
+export const generateSeasonalImagePreviews = async (style: '동양화' | '일러스트' | '사진', eventKeywords: string, numberOfImages: number = 3): Promise<string[]> => {
+    const styleKeywords = {
+        '동양화': 'elegant oriental ink wash painting (sumi-e), minimalist, clean brush strokes, traditional Korean art style, lots of negative space',
+        '일러스트': 'warm and cozy illustration, flat design style, simple characters, pastel color palette, vector art, minimalist background, friendly and heartwarming mood',
+        '사진': 'emotional and cinematic photograph, soft focus, warm lighting, high quality, photorealistic, bokeh background'
+    };
+
+    const compositionKeywords = 'wide horizontal aspect ratio for a mobile message (1200x900px), asymmetrical composition, main subjects are placed on the left half of the image, leaving the right half as a simple, clean, and spacious background for placing text, lots of negative space, clean design';
+    
+    const negativeKeywords = '-neg text, letters, signature, watermark, complex details, realistic photo, human faces, typography, borders';
+    
+    const prompt = `${styleKeywords[style]}, ${eventKeywords}, ${compositionKeywords} ${negativeKeywords}`;
+    
+    const generationPromises = Array(numberOfImages).fill(0).map(() => 
+        generateImage(prompt, getAspectRatio(DesignType.SeasonalGreeting))
+    );
+    return Promise.all(generationPromises);
+};
+
 
 const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta', dieline?: { cutPath: string; creasePath: string; }): string => {
     const designBrief = project.designBrief;
@@ -324,10 +362,7 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
         case DesignType.Poster: return `${basePrompt}
             - **Image Layers**: Designate one main area for 'main_photo'.
             - **Text Layers**: Main Title ("${designBrief.title}"): ~${ptToPx(120)}px, boldest weight. Subtitle ("${designBrief.subtitle}"): ~${ptToPx(60)}px. Body Text ("${designBrief.bodyText}"): ~${ptToPx(40)}px.`;
-        case DesignType.Flyer: return `${basePrompt}
-            - **Task**: Design a content-rich A4 flyer. Balance headlines, body text, and images.
-            - **Image Layers**: Designate one main area for 'main_photo' and possibly smaller areas for other images.
-            - **Text Layers**: Main Title ("${designBrief.title}"): ~${ptToPx(80)}px. Subtitle: ~${ptToPx(40)}px. Body Text ("${designBrief.bodyText}"): ~${ptToPx(12)}px. Contact Info ("${designBrief.contactInfo}"): ~${ptToPx(10)}px.`;
+        case DesignType.Flyer: return `${basePrompt}\n${FLYER_PRINCIPLES(project.designBrief)}`;
         case DesignType.Booklet:
             if (pageContext === 'cover') {
                 return `${basePrompt}
@@ -362,15 +397,30 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
             }
             return cardNewsPrompt;
         case DesignType.BusinessCardFront: return `${basePrompt}\n${BUSINESS_CARD_FRONT_PRINCIPLES}
+            **Business Card Typography Hierarchy (MANDATORY RULES):**
+            You MUST follow this typography guide precisely. All font sizes are in pixels.
+            1.  **Name (이름):** Font Size: 50-63px. Font Weight: MUST be 700 (Bold) or 900 (Black). Letter Spacing: Use a slightly negative value like -2.
+            2.  **Company (회사명):** Font Size: 42-50px. Slightly smaller than the name. Font Weight: 500 (Medium) or 700 (Bold).
+            3.  **Title (직책):** Font Size: 29-33px. Font Weight: 400 (Regular) or 500 (Medium).
+            **General Rules:**
+            - **Minimum Font Size:** Do not use a font size smaller than 25px for any text.
+            - **Letter Spacing (자간):** Apply small negative letter spacing to titles and larger text for better visual balance.
             - **Data**: Name/Company: ${designBrief.title}, Title/Role: ${designBrief.subtitle}.
             - **Task**: Create text, image, and shape layers for the FRONT of the business card. Include a placeholder for a logo ('logo_photo' or 'brand_logo' if a brand kit is used).`;
         case DesignType.BusinessCardBack: return `${basePrompt}\n${BUSINESS_CARD_BACK_PRINCIPLES}
+            **Business Card Typography Hierarchy (MANDATORY RULES):**
+            You MUST follow this typography guide precisely. All font sizes are in pixels.
+            1.  **Contact Info (Mobile, Tel, Email, Fax):** Font Size: 31-38px. Font Weight: 400 (Regular) or 500 (Medium). Mobile can be slightly bolder. Keep these visually grouped. Use labels like M., T., E., F..
+            2.  **Address/Website:** Font Size: 29-33px. Can be the smallest text. Font Weight: 400 (Regular). If address is multi-line, use line-height ~1.5.
+            **General Rules:**
+            - **Minimum Font Size:** Do not use a font size smaller than 25px for any text.
+            - **Letter Spacing (자간):** Apply small negative letter spacing to larger text for better visual balance.
             - **Data**: Body Text: "${designBrief.bodyText}", Contact Info: "${designBrief.contactInfo}".
             - **Task**: Create text and shape layers for the BACK of the business card. Clearly format the body text and contact information.`;
         case DesignType.Placard:
-        case DesignType.Banner: return `${basePrompt}\n${BANNER_DESIGN_PRINCIPLES}
-            - **Image Layers**: Designate a large area for 'main_photo'.
-            - **Text Layers**: Main Message ("${designBrief.title}"): ~${ptToPx(200)}px. Sub-message ("${designBrief.subtitle}"): ~${ptToPx(100)}px. Text MUST have strong effects for visibility.`;
+        case DesignType.Banner: return `${basePrompt}\n${LARGE_BANNER_PRINCIPLES(project.designBrief)}`;
+        case DesignType.WideBanner: return `${basePrompt}\n${WIDE_BANNER_PRINCIPLES(project.designBrief)}`;
+        case DesignType.XBanner: return `${basePrompt}\n${X_BANNER_PRINCIPLES(project.designBrief)}`;
         case DesignType.VColoring: return `${basePrompt}
             - **Task**: Design a 9:16 vertical mobile screen for V-Coloring.
             - **Layout Style**: Focus on a single, powerful visual and very large, readable text. The message must be understood in seconds.
@@ -384,11 +434,11 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
             - **Image Layers**: Include a prominent placeholder for a profile picture or logo ('main_photo' or 'brand_logo').
             - **Shape Layers**: Use subtle lines or blocks to separate information sections. Add placeholders for clickable icons (phone, email, web).`;
         case DesignType.SeasonalGreeting: return `${basePrompt}
-            - **Task**: Design a vertical image for a seasonal greeting MMS message.
-            - **Layout Style**: Warm, friendly, and celebratory, fitting the specified holiday.
-            - **Text Layers**: A large, decorative greeting message ("${designBrief.title}"). A smaller sign-off for the sender at the bottom.
-            - **Image Layers**: Placeholder for a relevant seasonal image ('main_photo').
-            - **Shape Layers**: Use festive decorative elements (e.g., simple snowflakes for winter, floral elements for spring).`;
+            - **Task**: Design a vertical layout for a seasonal greeting mobile message.
+            - **Layout Style**: Warm, friendly, and celebratory.
+            - **Text Placement**: The provided image is a background with empty space for text. Analyze the image and place the main greeting text ("${designBrief.bodyText}") in the most appropriate empty or low-clutter area.
+            - **Text Layers**: Create one main text layer for the body text ("${designBrief.bodyText}"). It should have a large, impactful font size. The font should be decorative but readable, and its color must contrast well with the background.
+            - **Image Layers**: Do not create any image layers. You are only placing text on top of the provided background image.`;
         case DesignType.ProductBox: return `${basePrompt}
             - **Task**: Design a layout for a product box.
             - **Content**: The product is "${designBrief.title}". Key feature: "${firstBodyLine}".
@@ -412,8 +462,214 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
 }
 
 export const generatePageLayout = async (type: DesignType, project: DesignProject, imageBase64?: string, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta', dieline?: { cutPath: string; creasePath: string; }): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
-    const layout = await generateLayoutFromPrompt(getLayoutPrompt(type, project, originalLayout, pageContext, dieline), imageBase64);
-    return { textLayers: layout.textLayers, imageLayers: layout.imageLayers, shapeLayers: layout.shapeLayers };
+    const jsonResponse = await generateLayoutFromPrompt(getLayoutPrompt(type, project, originalLayout, pageContext, dieline), imageBase64);
+    
+    const ensureLayerDefaults = (layer: any) => ({ ...layer, isVisible: true, isLocked: false });
+    const ensureTextDefaults = (layer: any) => ({ ...layer, fontStyle: layer.fontStyle || 'normal', textDecoration: layer.textDecoration || 'none' });
+
+    return {
+        textLayers: (jsonResponse.textLayers || []).map(ensureLayerDefaults).map(ensureTextDefaults),
+        imageLayers: (jsonResponse.imageLayers || []).map(ensureLayerDefaults),
+        shapeLayers: (jsonResponse.shapeLayers || []).map(ensureLayerDefaults)
+    };
+};
+
+export const refinePageLayout = async (
+    page: DesignPage,
+    project: DesignProject,
+    prompt: string
+): Promise<Partial<DesignPage>> => {
+    const layoutPrompt = getLayoutPrompt(page.type, project, page);
+    
+    const refinePrompt = `
+        You are a senior graphic designer refining an existing layout based on a user's instruction.
+        The user wants to refine the current page layout with the following instruction: "${prompt}".
+
+        Current layout JSON:
+        ${JSON.stringify({ textLayers: page.textLayers, imageLayers: page.imageLayers, shapeLayers: page.shapeLayers }, null, 2)}
+
+        Analyze the instruction and the current layout, then generate a new, improved layout JSON that reflects the user's request while maintaining the design's integrity.
+        You MUST adhere to all rules from the original layout prompt. Your output is only the JSON.
+
+        Original Prompt Core:
+        ${layoutPrompt}
+    `;
+    
+    const newLayout = await generateLayoutFromPrompt(refinePrompt);
+    return newLayout;
+};
+
+export const remixPageLayout = async (
+    page: DesignPage,
+    project: DesignProject
+): Promise<Partial<DesignPage>[]> => {
+    const layoutPrompt = getLayoutPrompt(page.type, project, page);
+
+    const remixPrompt = `
+        You are an innovative AI graphic designer tasked with "remixing" an existing design.
+        Your goal is to generate THREE distinct, creative, and professionally balanced alternative layouts for the given set of layers, while keeping ALL content (text, image assets) exactly the same.
+
+        **Existing Layout JSON to Remix:**
+        ${JSON.stringify({ textLayers: page.textLayers, imageLayers: page.imageLayers, shapeLayers: page.shapeLayers }, null, 2)}
+
+        **Instructions for Remixing:**
+        1.  **Generate 3 Variations:** You must create an array of 3 unique layout objects.
+        2.  **Preserve Content:** Each variation MUST include all original text and image layers. The 'content' of text layers and 'assetId' of image layers must not change. The IDs of the original layers MUST be preserved.
+        3.  **Be Creative with Layout:** For each variation, radically change the positions, sizes, and rotations of the layers. You can also add, remove, or modify shape layers to create new visual structures. Explore different design principles: asymmetry, rule of thirds, grid systems, etc.
+        4.  **Adhere to Original Rules:** Each new layout must still follow the core design rules outlined in the original prompt below.
+        5.  **Return JSON Array:** Your output MUST be a JSON object containing a key "layouts" which is an array of 3 layout objects.
+
+        **Original Prompt Core (for context and rules):**
+        ${layoutPrompt}
+    `;
+
+    const result = await generateLayoutFromPrompt(remixPrompt, undefined, REMIX_LAYOUT_SCHEMA);
+    return result.layouts;
+};
+
+export const adaptPageLayout = async (
+    page: DesignPage,
+    project: DesignProject,
+    targetType: DesignType
+): Promise<DesignDocument> => {
+    const layoutPrompt = getLayoutPrompt(targetType, project, page);
+    const dimensions = MATERIAL_DIMENSIONS[targetType];
+    const newLayout = await generateLayoutFromPrompt(layoutPrompt);
+
+    const newPage: DesignPage = {
+        id: uuidv4(),
+        type: targetType,
+        base64: page.base64, // Reuse original background
+        pageNumber: 1,
+        width_mm: dimensions.width_mm,
+        height_mm: dimensions.height_mm,
+        ...newLayout
+    };
+
+    return {
+        id: uuidv4(),
+        name: `${page.type} -> ${targetType} 변환`,
+        pages: [newPage],
+    };
+};
+
+export const executeMagicWandAction = async (
+    page: DesignPage,
+    project: DesignProject,
+    targetLayers: AllLayer[],
+    position: { x: number, y: number },
+    prompt: string
+): Promise<Partial<DesignPage>> => {
+    const layoutPrompt = getLayoutPrompt(page.type, project, page);
+    
+    const magicWandPrompt = `
+        You are an AI design assistant using a "magic wand" tool.
+        The user clicked at position (${position.x}, ${position.y}) on the canvas and provided an instruction: "${prompt}".
+        The click primarily targeted the following layers:
+        ${JSON.stringify(targetLayers.map(l => ({ id: l.id, name: 'name' in l && l.name ? l.name : l.id, type: 'content' in l ? 'text' : 'assetId' in l ? 'image' : 'shape' })), null, 2)}
+        
+        The full page layout is:
+        ${JSON.stringify({ textLayers: page.textLayers, imageLayers: page.imageLayers, shapeLayers: page.shapeLayers }, null, 2)}
+
+        Interpret the user's instruction in the context of the clicked position and targeted layers.
+        Generate a new, improved layout JSON that applies the requested change. For example, if the user says "make this bigger" and clicked on a text layer, you should increase its font size and dimensions. If they say "align these", you should adjust the positions of the target layers.
+        You MUST adhere to all rules from the original layout prompt. Your output is only the JSON.
+        
+        Original Prompt Core:
+        ${layoutPrompt}
+    `;
+
+    const newLayout = await generateLayoutFromPrompt(magicWandPrompt);
+    return newLayout;
+};
+
+export const scanDesignFromImage = async (
+    imageBase64: string,
+    designType: DesignType,
+    projectData: DesignProject
+): Promise<DesignDocument> => {
+    let finalDesignType: DesignType;
+
+    if (designType === DesignType.AutoDetect) {
+        const typeDetectionPrompt = `
+            Analyze the provided image and determine its design type.
+            You MUST choose one of the following types: ${Object.values(DesignType).filter(t => t !== DesignType.AutoDetect).join(', ')}.
+            Your response MUST be a JSON object with a single key "detectedType".
+        `;
+        try {
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: { parts: [
+                    { text: typeDetectionPrompt },
+                    { inlineData: { mimeType: 'image/png', data: imageBase64 } }
+                ]},
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: DESIGN_TYPE_DETECTION_SCHEMA,
+                },
+            });
+            const jsonString = response.text.trim();
+            const result = JSON.parse(jsonString);
+            const detectedType = result.detectedType as DesignType;
+            if (detectedType && Object.values(DesignType).includes(detectedType)) {
+                finalDesignType = detectedType;
+            } else {
+                finalDesignType = DesignType.Poster; // Fallback
+            }
+        } catch (error) {
+            console.error("AI Design Type Detection Failed:", error);
+            finalDesignType = DesignType.Poster; // Fallback on any error
+        }
+    } else {
+        finalDesignType = designType;
+    }
+
+    // Step 1: Extract a clean background from the scanned image.
+    const backgroundExtractionPrompt = `Analyze the provided design image. Identify all foreground elements like text, logos, and distinct objects. Your task is to remove them completely and create a new, clean background image that preserves the original background's style, color, and texture by intelligently filling in the gaps (inpainting). The result MUST be only the clean background image.`;
+    
+    let cleanBackgroundBase64 = imageBase64; // Fallback to original
+    try {
+        const backgroundResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [
+                { inlineData: { data: imageBase64, mimeType: 'image/png' } },
+                { text: backgroundExtractionPrompt },
+            ]},
+            config: { responseModalities: [Modality.IMAGE] },
+        });
+
+        for (const part of backgroundResponse.candidates[0].content.parts) {
+            if (part.inlineData) {
+                cleanBackgroundBase64 = part.inlineData.data;
+                break;
+            }
+        }
+    } catch (error) {
+        console.error("AI Background Extraction during scan failed:", error);
+        // Silently fail and use the original image as background
+    }
+
+    // Step 2: Generate the layout by analyzing the ORIGINAL image.
+    const layout = await generatePageLayout(finalDesignType, projectData, imageBase64);
+    const dimensions = MATERIAL_DIMENSIONS[finalDesignType];
+
+    const newPage: DesignPage = {
+        id: uuidv4(),
+        type: finalDesignType,
+        base64: cleanBackgroundBase64,
+        pageNumber: 1,
+        width_mm: dimensions.width_mm,
+        height_mm: dimensions.height_mm,
+        hGuides: [],
+        vGuides: [],
+        ...layout
+    };
+
+    return {
+        id: uuidv4(),
+        name: `스캔된 ${finalDesignType}`,
+        pages: [newPage],
+    };
 };
 
 export const convertPreviewToEditableDocument = async (
@@ -423,26 +679,35 @@ export const convertPreviewToEditableDocument = async (
 ): Promise<DesignDocument> => {
     
     // Step 1: Extract the background from the preview image.
-    const backgroundExtractionPrompt = `You are a professional background designer.
-    Analyze the provided image, which is a complete design.
-    Your task is to identify the background style, colors, textures, and geometric patterns.
-    Then, create a brand new, clean background image that captures the essential style of the original background, but contains ABSOLUTELY NO text, logos, or foreground elements.
-    The final output MUST be only the clean background image. Do not add any text, elements, or explanations.`;
-    
-    const backgroundResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: { parts: [
-            { inlineData: { data: previewBase64, mimeType: 'image/png' } },
-            { text: backgroundExtractionPrompt },
-        ]},
-        config: { responseModalities: [Modality.IMAGE, Modality.TEXT] },
-    });
-    
-    let backgroundBase64 = previewBase64; // Fallback to original
-    for (const part of backgroundResponse.candidates[0].content.parts) {
-        if (part.inlineData) {
-            backgroundBase64 = part.inlineData.data;
-            break;
+    let backgroundBase64: string;
+
+    if (designType === DesignType.SeasonalGreeting) {
+        // For seasonal greetings, the wizard generates a background-only image.
+        // We use it directly and the layout generation AI will add the text.
+        backgroundBase64 = previewBase64;
+    } else {
+        // For other types, the preview is a complete design, so we extract the background from it.
+        const backgroundExtractionPrompt = `You are a professional background designer.
+        Analyze the provided image, which is a complete design.
+        Your task is to identify the background style, colors, textures, and geometric patterns.
+        Then, create a brand new, clean background image that captures the essential style of the original background, but contains ABSOLUTELY NO text, logos, or foreground elements.
+        The final output MUST be only the clean background image. Do not add any text, elements, or explanations.`;
+        
+        const backgroundResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [
+                { inlineData: { data: previewBase64, mimeType: 'image/png' } },
+                { text: backgroundExtractionPrompt },
+            ]},
+            config: { responseModalities: [Modality.IMAGE] },
+        });
+        
+        backgroundBase64 = previewBase64; // Fallback to original
+        for (const part of backgroundResponse.candidates[0].content.parts) {
+            if (part.inlineData) {
+                backgroundBase64 = part.inlineData.data;
+                break;
+            }
         }
     }
 
@@ -466,190 +731,23 @@ export const convertPreviewToEditableDocument = async (
         const backDims = MATERIAL_DIMENSIONS[DesignType.BusinessCardBack];
         const frontPage: DesignPage = { ...frontLayout, id: uuidv4(), type: DesignType.BusinessCardFront, base64: backgroundBase64, pairId, pageNumber: 1, width_mm: frontDims.width_mm, height_mm: frontDims.height_mm };
         const backPage: DesignPage = { ...backLayout, id: uuidv4(), type: DesignType.BusinessCardBack, base64: backgroundBase64, pairId, pageNumber: 2, width_mm: backDims.width_mm, height_mm: backDims.height_mm };
-        return { id: uuidv4(), name: '명함 세트', pages: [frontPage, backPage] };
-
-    } else if (designType === DesignType.CardNews) {
-        const [page1Layout, page2Layout, page3Layout] = await Promise.all([
-            generatePageLayout(designType, project, previewBase64, undefined, 'cover'),
-            generatePageLayout(designType, project, undefined, undefined, 'inner'),
-            generatePageLayout(designType, project, undefined, undefined, 'cta'),
-        ]);
-        const dimensions = MATERIAL_DIMENSIONS[designType];
-        const pages: DesignPage[] = [
-            { ...page1Layout, id: uuidv4(), type: designType, base64: backgroundBase64, pageNumber: 1, width_mm: dimensions.width_mm, height_mm: dimensions.height_mm },
-            { ...page2Layout, id: uuidv4(), type: designType, base64: backgroundBase64, pageNumber: 2, width_mm: dimensions.width_mm, height_mm: dimensions.height_mm },
-            { ...page3Layout, id: uuidv4(), type: designType, base64: backgroundBase64, pageNumber: 3, width_mm: dimensions.width_mm, height_mm: dimensions.height_mm },
-        ];
-        return { id: uuidv4(), name: designType, pages };
+        return { id: uuidv4(), name: '명함', pages: [frontPage, backPage] };
     } else {
-        const singleDesignType = designType as DesignType;
-        const layout = await generatePageLayout(singleDesignType, project, previewBase64);
-        const dimensions = MATERIAL_DIMENSIONS[singleDesignType];
-        const page: DesignPage = { ...layout, id: uuidv4(), type: singleDesignType, base64: backgroundBase64, pageNumber: 1, width_mm: dimensions.width_mm, height_mm: dimensions.height_mm };
-        return { id: uuidv4(), name: singleDesignType, pages: [page] };
-    }
-};
-
-export const adaptDesign = async (originalPage: DesignPage, targetType: DesignType, projectData: DesignProject): Promise<DesignDocument> => {
-    // 1. Generate a new background that is consistent with the original
-    const originalPrompt = getPreviewImagePrompts(projectData)[originalPage.type];
-    const adaptPrompt = `Create a new background image for a '${targetType}' based on the style of a previous design.
-    The original design's style was described as: "${originalPrompt}"
-    Adapt this style to the new format, maintaining the core visual identity (colors, mood, complexity). Generate ONLY the background image without any text.`;
-    const newAspectRatio = getAspectRatio(targetType);
-    const newBase64 = await generateImage(adaptPrompt, newAspectRatio);
-
-    // 2. Generate a new layout, providing the original layout as context
-    const newLayout = await generatePageLayout(targetType, projectData, undefined, originalPage);
-    
-    const dimensions = MATERIAL_DIMENSIONS[targetType];
-
-    const adaptedPage: DesignPage = {
-        ...newLayout,
-        id: uuidv4(),
-        type: targetType,
-        base64: newBase64,
-        pageNumber: 1,
-        width_mm: dimensions.width_mm,
-        height_mm: dimensions.height_mm,
-    };
-    
-    const adaptedDocument: DesignDocument = {
-        id: uuidv4(),
-        name: targetType,
-        pages: [adaptedPage]
-    };
-    return adaptedDocument;
-};
-
-export const scanDesignFromImage = async (
-    imageBase64: string,
-    targetType: DesignType,
-    project: DesignProject
-): Promise<DesignDocument> => {
-    
-    // Per user feedback, do not automatically "restore" the background by removing elements.
-    // Instead, use the original uploaded image as the background to "decompose" it into layers.
-    const backgroundBase64 = imageBase64;
-
-    // Generate layout by analyzing the uploaded image.
-    const layout = await generatePageLayout(targetType, project, imageBase64);
-    const dimensions = MATERIAL_DIMENSIONS[targetType];
-    const page: DesignPage = { 
-        ...layout, 
-        id: uuidv4(), 
-        type: targetType, 
-        base64: backgroundBase64, 
-        pageNumber: 1,
-        width_mm: dimensions.width_mm,
-        height_mm: dimensions.height_mm,
-    };
-    
-    return { 
-        id: uuidv4(), 
-        name: `${targetType} (스캔됨)`, 
-        pages: [page] 
-    };
-};
-
-const getRefinementPrompt = (page: DesignPage, project: DesignProject, refinementPrompt: string): string => {
-    const designBrief = project.designBrief;
-    const dimensions = MATERIAL_DIMENSIONS[page.type];
-    const canvasWidthPx = mmToPx(dimensions.width_mm);
-    const canvasHeightPx = mmToPx(dimensions.height_mm);
-
-    const existingLayout = JSON.stringify({ textLayers: page.textLayers, imageLayers: page.imageLayers, shapeLayers: page.shapeLayers }, null, 2);
-
-    return `You are an expert graphic designer tasked with refining an existing design based on a user's request.
-
-    **User's Refinement Request:** "${refinementPrompt}"
-
-    **Original Design Brief:**
-    - Title: ${designBrief.title}
-    - Tone & Manner: "${TONE_AND_MANNERS[designBrief.toneAndManner]}"
-    - Color Palette Concept: ${designBrief.colorPalette}
-    - Keywords: ${designBrief.keywords.join(', ')}
-
-    **Existing Layout (JSON):**
-    ${existingLayout}
-
-    **Your Task:**
-    1.  Analyze the user's request and the existing layout.
-    2.  Generate a **new layout** as a JSON object that creatively incorporates the user's feedback.
-    3.  You can adjust colors, fonts, positions, sizes, and effects. You can add minor decorative shapes.
-    4.  You MUST preserve the core text content and image assets ('assetId').
-    5.  The new layout must be for a ${canvasWidthPx}px by ${canvasHeightPx}px canvas.
-    6.  Adhere to the same JSON schema as the original layout. Your output MUST be only the JSON object.
-    
-    **Available Fonts:**
-    ${JSON.stringify(KOREAN_FONTS_LIST.map(f => ({ name: f.name, weights: f.weights, style: f.style })), null, 2)}
-    `;
-};
-
-export const refinePageLayout = async (page: DesignPage, project: DesignProject, refinementPrompt: string): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
-    const layout = await generateLayoutFromPrompt(getRefinementPrompt(page, project, refinementPrompt));
-    return { textLayers: layout.textLayers, imageLayers: layout.imageLayers, shapeLayers: layout.shapeLayers };
-};
-
-const getMagicWandPrompt = (
-    page: DesignPage,
-    project: DesignProject,
-    selectedLayers: AllLayer[],
-    clickPosition: { x: number, y: number },
-    instruction: string
-): string => {
-    const designBrief = project.designBrief;
-    const dimensions = MATERIAL_DIMENSIONS[page.type];
-    const canvasWidthPx = mmToPx(dimensions.width_mm);
-    const canvasHeightPx = mmToPx(dimensions.height_mm);
-    const primaryFont = project.brandKit.fonts.find(f => f.role === 'Headline')?.fontFamily || designBrief.fontFamily;
-
-    return `You are an expert AI design assistant integrated into a design tool. You will modify a design layout based on a user's natural language command, their selection, and where they clicked.
-
-    **User's Command:** "${instruction}"
-
-    **Context:**
-    - **Selected Layers:** The user has these layers selected (JSON): ${JSON.stringify(selectedLayers, null, 2)}
-    - **Click Position:** The user clicked at coordinates (x: ${Math.round(clickPosition.x)}, y: ${Math.round(clickPosition.y)}) on the canvas. This position indicates the user's focus or the target area for the action.
-
-    **Original Design Brief:**
-    - Title: ${designBrief.title}
-    - Tone & Manner: "${TONE_AND_MANNERS[designBrief.toneAndManner]}"
-    - Color Palette Concept: ${designBrief.colorPalette}
-    - Keywords: ${designBrief.keywords.join(', ')}
-
-    **Existing Full Layout (JSON):**
-    ${JSON.stringify({ textLayers: page.textLayers, imageLayers: page.imageLayers, shapeLayers: page.shapeLayers }, null, 2)}
-    
-    **Your Task:**
-    1.  Analyze the user's command, their selection, and their click position to understand their intent. For example, if they ask to create a "reflection", you should create a duplicated, flipped, and faded version of the selected layer below it. If they ask to add an "icon", generate a new shape layer that looks like that icon near the click position.
-    2.  Generate a **COMPLETE NEW LAYOUT** as a single JSON object that creatively incorporates the user's request.
-    3.  You can add, remove, or modify layers. You can change properties like position, size, color, font, content, etc.
-    4.  When adding new layers, you MUST generate a new unique UUID for the 'id' field using a format like 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.
-    5.  Your response must be a single JSON object conforming to the standard layout schema, containing 'textLayers', 'imageLayers', and 'shapeLayers' arrays. Do not add any other text.
-    6.  For every generated layer, you MUST include a short, descriptive 'name' in Korean.
-    7. Preserve the IDs of layers that are not changed or are only slightly modified.
-    
-    **Canvas and Font Info:**
-    - Canvas dimensions: ${canvasWidthPx}px by ${canvasHeightPx}px.
-    - Default primary font: "${primaryFont}".
-    - Available Fonts: ${JSON.stringify(KOREAN_FONTS_LIST.map(f => ({ name: f.name, weights: f.weights, style: f.style })), null, 2)}
-    `;
-};
-
-export const executeMagicWandAction = async (
-    page: DesignPage,
-    project: DesignProject,
-    selectedLayers: AllLayer[],
-    clickPosition: { x: number, y: number },
-    instruction: string
-): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
-    const prompt = getMagicWandPrompt(page, project, selectedLayers, clickPosition, instruction);
-    try {
-        const layout = await generateLayoutFromPrompt(prompt);
-        return { textLayers: layout.textLayers, imageLayers: layout.imageLayers, shapeLayers: layout.shapeLayers };
-    } catch (error) {
-        console.error("Error executing Magic Wand action:", error);
-        throw new Error("AI Magic Wand action failed.");
+        const layout = await generatePageLayout(designType, project, previewBase64);
+        const dimensions = MATERIAL_DIMENSIONS[designType];
+        const newPage: DesignPage = {
+            ...layout,
+            id: uuidv4(),
+            type: designType,
+            base64: backgroundBase64,
+            pageNumber: 1,
+            width_mm: dimensions.width_mm,
+            height_mm: dimensions.height_mm,
+        };
+        return {
+            id: uuidv4(),
+            name: designType,
+            pages: [newPage],
+        };
     }
 };
