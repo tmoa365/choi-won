@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button, Input } from '../components/ui';
 import { SquareIcon, CircleIcon, LineIcon, SpinnerIcon, SearchIcon } from '../components/icons';
 import { ptToPx, dataURLtoFile, getApiErrorMessage } from './utils';
-import { generateDesignElement, searchImages } from '../services/geminiService';
+import { generateDesignElement, searchImages } from '../services';
 import { AIPhotoEditorModal } from '../components/AIPhotoEditorModal';
 
 interface AssetPanelProps {

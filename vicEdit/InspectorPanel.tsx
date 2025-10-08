@@ -46,11 +46,11 @@ const defaultEffects: { [K in TextEffectType]: Extract<TextEffect, {type: K}> } 
 
 const InspectorAccordion: React.FC<{ title: string; children: React.ReactNode; isOpen: boolean; onToggle: () => void; }> = ({ title, children, isOpen, onToggle }) => (
     <div className="border-b border-slate-200">
-        <button onClick={onToggle} className="flex justify-between items-center w-full py-2 text-left">
+        <button onClick={onToggle} className="flex justify-between items-center w-full py-4 px-2 text-left">
             <span className="font-semibold text-slate-600 text-xs uppercase tracking-wider">{title}</span>
             <ChevronDownIcon className={`w-5 h-5 text-slate-500 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
         </button>
-        {isOpen && <div className="py-3 px-1 space-y-4">{children}</div>}
+        {isOpen && <div className="py-4 px-2 space-y-4">{children}</div>}
     </div>
 );
 
@@ -197,7 +197,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
     }
     
     return (
-        <div className="w-80 bg-slate-50 overflow-y-auto flex-shrink-0 flex flex-col border-l border-slate-200">
+        <div className="w-80 bg-white overflow-y-auto flex-shrink-0 flex flex-col border-l border-slate-200">
             <div className="p-3 border-b border-slate-200 flex justify-between items-center">
                 <h2 className="text-base font-bold truncate" title={getHeaderTitle()}>{getHeaderTitle()}</h2>
                 <div>
@@ -357,7 +357,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                 </InspectorAccordion>
             </div>
 
-            <div className="p-3 border-t mt-auto bg-slate-100">
+            <div className="p-3 border-t border-slate-200 mt-auto bg-white">
                 <div className="grid grid-cols-3 gap-2">
                     <Button variant="secondary" size="sm" onClick={() => handleLayerOrderChange('front')} title="맨 앞으로" disabled={selectedLayers.length === 0}><BringForwardIcon className="w-5 h-5"/></Button>
                     <Button variant="secondary" size="sm" onClick={() => handleLayerOrderChange('backward')} title="뒤로" disabled={selectedLayers.length === 0}><SendBackwardIcon className="w-5 h-5"/></Button>

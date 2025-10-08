@@ -102,23 +102,28 @@ export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNe
                 <ChevronDownIcon className={`h-5 w-5 ml-2 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </Button>
             {isOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-30 max-h-96 overflow-y-auto">
-                    <div className="py-1">
+                <div className="absolute right-0 mt-2 w-[40rem] rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-30">
+                    <div className="p-6 grid grid-cols-3 gap-x-8 gap-y-6">
                         {designGroups.map(group => (
                             <div key={group.group}>
-                                <h3 className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">{group.group}</h3>
-                                {group.options.map(option => (
-                                    <a key={option.type} href="#" onClick={(e) => { e.preventDefault(); handleSelect(option.type); }}
-                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                                        {option.label}
-                                    </a>
-                                ))}
+                                <h3 className="mb-3 text-sm font-semibold text-slate-900 uppercase tracking-wider">{group.group}</h3>
+                                <ul className="space-y-1">
+                                    {group.options.map(option => (
+                                        <li key={option.type}>
+                                            <a href="#" onClick={(e) => { e.preventDefault(); handleSelect(option.type); }}
+                                                className="block px-2 py-1.5 text-sm text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 rounded-md transition-colors">
+                                                {option.label}
+                                            </a>
+                                        </li>
+                                    ))}
+                                </ul>
                             </div>
                         ))}
-                        <div className="border-t my-1"></div>
+                    </div>
+                    <div className="border-t bg-slate-50 p-3 rounded-b-md">
                          <a href="#" onClick={(e) => { e.preventDefault(); setIsModalOpen(true); }}
-                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                            사용자 정의 크기...
+                            className="block px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-100 rounded-md font-semibold text-center transition-colors">
+                            + 사용자 정의 크기로 만들기
                         </a>
                     </div>
                 </div>

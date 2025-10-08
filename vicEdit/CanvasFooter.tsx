@@ -16,7 +16,7 @@ export const CanvasFooter: React.FC<CanvasFooterProps> = ({ zoom, setZoom, fitTo
     const zoomOut = () => setZoom(Math.max(zoom - 0.25, 0.25));
 
     return (
-        <div className="flex-shrink-0 bg-slate-100 p-2 flex items-center justify-center gap-4 border-t">
+        <div className="flex-shrink-0 bg-white p-2 flex items-center justify-center gap-4 border-t border-slate-200">
              <Button onClick={() => setShowRulers(!showRulers)} variant="secondary" size="sm" title="눈금자 표시/숨기기" className={showRulers ? '!bg-indigo-100 text-indigo-700' : ''}>
                 <RulerIcon className="h-5 w-5" />
             </Button>

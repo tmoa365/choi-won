@@ -57,8 +57,8 @@ export const LeftPanel: React.FC<LeftPanelProps> = (props) => {
     ];
 
     return (
-        <div className="w-80 bg-slate-50 flex flex-shrink-0 h-full border-r border-slate-200">
-            <div className="w-20 bg-slate-100 p-2 flex flex-col items-center gap-2 border-r border-slate-200">
+        <div className="w-80 bg-white flex flex-shrink-0 h-full border-r border-slate-200">
+            <div className="w-20 bg-white p-2 flex flex-col items-center gap-2 border-r border-slate-200">
                 {tabs.map(tab => (
                     <button key={tab.id} onClick={() => handleTabChange(tab.id as any)}
                         className={`w-full flex flex-col items-center p-2 rounded-lg transition-colors ${activeTab === tab.id ? 'bg-indigo-600 text-white' : 'hover:bg-slate-200 text-slate-600'}`}>

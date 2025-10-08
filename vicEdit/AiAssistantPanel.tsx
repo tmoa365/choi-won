@@ -3,7 +3,7 @@ import { DesignProject, DesignType, GenerationOption, DesignBrief, DesignPage } 
 import { Button, Input, Label, Select, Textarea } from '../components/ui';
 import { SparklesIcon, SpinnerIcon, CheckCircleIcon, PhotoIcon, SearchIcon, TypeIcon, PaintBrushIcon, TableCellsIcon } from '../components/icons';
 import { DESIGN_KEYWORDS, TONE_AND_MANNERS, getAvailableColorPalettes } from '../constants';
-import { generateDesignCopy, searchImages } from '../services/geminiService';
+import { generateDesignCopy, searchImages } from '../services';
 import { dataURLtoFile } from './utils';
 import { v4 as uuidv4 } from 'uuid';
 

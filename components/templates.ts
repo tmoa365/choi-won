@@ -85,7 +85,6 @@ export const TEMPLATES: Template[] = [
                     textLayers: [
                         { id: uuidv4(), content: 'URBAN GRIND', top: 521, left: 147, width: 4202, height: 494, fontSize: 411, fontWeight: 900, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 1, isVisible: true, isLocked: false },
                         { id: uuidv4(), content: 'CAFE', top: 928, left: 147, width: 1421, height: 351, fontSize: 292, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 0.8, isVisible: true, isLocked: false },
-                        // FIX: Add missing properties to this TextLayer object.
                         { id: uuidv4(), content: 'GRAND OPENING', top: 5880, left: 147, width: 1599, height: 169, fontSize: 141, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 1, isVisible: true, isLocked: false }
                     ],
                     imageLayers: [],

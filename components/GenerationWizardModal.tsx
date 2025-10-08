@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, ChangeEvent, useMemo } from 'r
 import { DesignBrief, DesignDocument, DesignProject, DesignType, GenerationOption, DesignPage } from '../types';
 import { Modal, Button, Textarea, Input, Select, Label } from './ui';
 import { SpinnerIcon, SparklesIcon, CheckCircleIcon } from './icons';
-import { expandBriefFromIdea, generateFullDesignPreviews, convertPreviewToEditableDocument } from '../services/geminiService';
+import { expandBriefFromIdea, generateFullDesignPreviews, convertPreviewToEditableDocument } from '../services';
 import { DESIGN_KEYWORDS, getAvailableColorPalettes, TONE_AND_MANNERS } from '../constants';
 import { getApiErrorMessage } from '../vicEdit/utils';
 import { KOREAN_FONTS_LIST } from './fonts';
@@ -67,7 +67,26 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
         setStep('expandingBrief');
         setError(null);
         try {
-            const expandedBrief = await expandBriefFromIdea(idea, designType as DesignType, contextInfo);
+            let descriptiveIdea = idea;
+            const baseDesignType = designType === 'BusinessCardSet' ? DesignType.BusinessCardFront : designType as DesignType;
+
+            switch (baseDesignType) {
+                case DesignType.Poster:
+                    descriptiveIdea = `${idea} (${contextInfo.purpose || '이벤트'})`;
+                    break;
+                case DesignType.Banner:
+                case DesignType.Placard:
+                    descriptiveIdea = `${idea} (${contextInfo.finishing || '타공'} 방식 현수막)`;
+                    break;
+                 case DesignType.Flyer:
+                    descriptiveIdea = `${idea} (${contextInfo.distribution_method || '매장 비치'}용 전단지)`;
+                    break;
+                case DesignType.Invitation:
+                    descriptiveIdea = `${contextInfo.event_type || '행사'} 초대장: ${idea}`;
+                    break;
+            }
+
+            const expandedBrief = await expandBriefFromIdea(descriptiveIdea, baseDesignType, contextInfo);
             setBrief(expandedBrief);
             setStep('editingBrief');
         } catch (err) {
@@ -115,7 +134,6 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
             const tempProjectData = { ...projectData, designBrief: brief };
             const newDocument = await convertPreviewToEditableDocument(selectedBase64, designType, tempProjectData);
             
-            // Add mockup/dieline info to the created document's pages
             const finalPages = newDocument.pages.map(p => {
                 let pageUpdates: Partial<DesignPage> = {};
                 if ([DesignType.TShirt, DesignType.EcoBag, DesignType.Cap, DesignType.Pouch].includes(p.type as DesignType)) {
@@ -142,6 +160,204 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
         const baseDesignType = designType === 'BusinessCardSet' ? DesignType.BusinessCardFront : designType as DesignType;
 
         switch (baseDesignType) {
+            case DesignType.Poster:
+                return (
+                    <div className="space-y-4">
+                        <div>
+                            <Label>1. 포스터의 목적을 알려주세요.</Label>
+                            <Select name="purpose" onChange={handleContextChange}>
+                                <option>매장 할인 / 이벤트 홍보</option>
+                                <option>신제품 / 신메뉴 출시 안내</option>
+                                <option>공연 / 행사 / 전시회 알림</option>
+                                <option>매장 오픈 / 이전 안내</option>
+                                <option>모집 / 채용 공고</option>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>2. 가장 중요한 핵심 정보를 입력해 주세요.</Label>
+                            <div className="space-y-2 p-3 bg-slate-100 rounded">
+                                <Input name="headline" onChange={handleContextChange} placeholder="가장 큰 제목 (예: TMOA 스튜디오 50% SALE)" />
+                                <Input name="date_time" onChange={handleContextChange} placeholder="날짜 및 시간 (예: 2025.10.15 ~ 10.31)" />
+                                <Input name="location" onChange={handleContextChange} placeholder="장소 / 위치 (예: 라페스타 B동 1층)" />
+                                <Input name="host_contact" onChange={handleContextChange} placeholder="주최 / 문의 (예: 주최: 티모아 / 문의: 010-1234-5678)" />
+                            </div>
+                        </div>
+                        <div>
+                            <Label>3. 어디에, 어떻게 부착하실 건가요?</Label>
+                            <Select name="attachment_location" onChange={handleContextChange}>
+                                <option value="indoor">실내 (벽, 문 등)</option>
+                                <option value="outdoor">실외 (비/햇빛 노출)</option>
+                            </Select>
+                            <p className="text-xs text-slate-500 mt-1">
+                                {contextInfo.attachment_location === 'outdoor' 
+                                    ? "실외용은 방수 및 내구성이 강한 PET 재질로 제작됩니다." 
+                                    : "실내용은 경제적인 고품질 스노우지로 제작됩니다."}
+                            </p>
+                        </div>
+                    </div>
+                );
+            case DesignType.Banner:
+            case DesignType.Placard:
+                return (<div className="space-y-4">
+                    <div>
+                        <Label>1. 어떻게 설치하실 건가요? (후가공 선택)</Label>
+                        <Select name="finishing" onChange={handleContextChange}>
+                            <option>끈으로 묶어서 (타공/아일렛)</option>
+                            <option>막대/봉에 끼워서 (봉 미싱)</option>
+                            <option>벽에 붙이거나 덮개로 (열재단)</option>
+                            <option>실내 거치대(X배너)에 세워서 (네 귀퉁이 타공)</option>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>2. 현수막의 핵심 문구를 알려주세요.</Label>
+                         <div className="space-y-2 p-3 bg-slate-100 rounded">
+                            <Input name="main_slogan" onChange={handleContextChange} placeholder="메인 문구 (가장 크게)" />
+                            <Input name="sub_slogan" onChange={handleContextChange} placeholder="보조 문구 (선택 사항)" />
+                        </div>
+                    </div>
+                     <div>
+                        <Label>3. 원하시는 사이즈를 선택 또는 입력해 주세요.</Label>
+                         <div className="grid grid-cols-2 gap-2">
+                             <Input name="width_cm" type="number" onChange={handleContextChange} placeholder="가로 (cm)" />
+                             <Input name="height_cm" type="number" onChange={handleContextChange} placeholder="세로 (cm)" />
+                         </div>
+                         <p className="text-xs text-slate-500 mt-1">일반 가로 현수막: 500x90cm / X배너: 60x180cm</p>
+                    </div>
+                </div>);
+            case DesignType.Flyer:
+                 return (<div className="space-y-4">
+                    <div>
+                        <Label>1. 배포 방식을 선택해 주세요.</Label>
+                        <Select name="distribution_method" onChange={handleContextChange}>
+                            <option>매장 비치 / 직접 전달</option>
+                            <option>아파트/주택 우편함</option>
+                            <option>길거리 배포</option>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>2. 전단지의 핵심 내용을 입력해 주세요.</Label>
+                         <div className="space-y-2 p-3 bg-slate-100 rounded">
+                             <Input name="headline" onChange={handleContextChange} placeholder="시선을 끄는 제목"/>
+                             <Textarea name="details" rows={3} onChange={handleContextChange} placeholder="상세 내용 (이벤트 기간, 가격 등)"/>
+                             <Input name="cta" onChange={handleContextChange} placeholder="고객 행동 유도 문구 (예: 하단 쿠폰을 오려오세요!)"/>
+                             <Input name="info" onChange={handleContextChange} placeholder="필수 정보 (주소, 연락처, 약도 등)"/>
+                        </div>
+                    </div>
+                    <div>
+                        <Label>3. (선택) 접지 옵션을 추가할까요?</Label>
+                        <Select name="folding_option" onChange={handleContextChange}>
+                            <option>아니오 (일반 전단지)</option>
+                            <option>네, 2단 접지 (반으로 접기)</option>
+                            <option>네, 3단 접지</option>
+                        </Select>
+                    </div>
+                </div>);
+             case DesignType.Leaflet:
+                return (<div className="space-y-4">
+                    <div>
+                        <Label>1. 접는 방식을 먼저 선택해 주세요.</Label>
+                        <Select name="folding_type" onChange={handleContextChange}>
+                            <option>2단 접지 (총 4면)</option>
+                            <option>3단 접지 (총 6면)</option>
+                            <option>대문 접지 (총 8면)</option>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>2. 각 페이지에 들어갈 내용을 알려주세요.</Label>
+                         <div className="space-y-2 p-3 bg-slate-100 rounded">
+                             <Textarea name="page_content_cover" rows={2} onChange={handleContextChange} placeholder="표지 내용 (로고, 제목 등)"/>
+                             <Textarea name="page_content_inner" rows={4} onChange={handleContextChange} placeholder="내지 내용 (펼쳤을 때 보일 상세 정보)"/>
+                             <Textarea name="page_content_back" rows={2} onChange={handleContextChange} placeholder="뒷면 내용 (연락처, 약도, 주소 등)"/>
+                        </div>
+                    </div>
+                </div>);
+            case DesignType.Booklet:
+                 return (<div className="space-y-4">
+                    <div>
+                        <Label>1. 전체 페이지 수를 알려주세요.</Label>
+                        <Input name="page_count" type="number" step="4" min="8" onChange={handleContextChange} placeholder="표지 포함, 4의 배수 (예: 8, 12, 16...)" />
+                        <p className="text-xs text-slate-500 mt-1">40p 이하: 중철 제본, 40p 이상: 무선 제본 추천</p>
+                    </div>
+                    <div>
+                        <Label>2. 책자의 기본 정보를 입력해 주세요.</Label>
+                        <div className="space-y-2 p-3 bg-slate-100 rounded">
+                           <Input name="book_title" onChange={handleContextChange} placeholder="책자 제목" />
+                           <Input name="publisher" onChange={handleContextChange} placeholder="발행처 / 저자" />
+                           <Input name="publish_date" onChange={handleContextChange} placeholder="발행일" />
+                        </div>
+                    </div>
+                     <div>
+                        <Label>3. 목차를 입력해 주세요. (AI가 내지 디자인 시 참고합니다)</Label>
+                        <Textarea name="toc" rows={4} onChange={handleContextChange} placeholder="예: 1. 회사 소개&#10;2. 제품 라인업&#10;3. 기술 사양..."/>
+                    </div>
+                </div>);
+            case DesignType.Invitation:
+                return (<div className="space-y-4">
+                     <div>
+                        <Label>1. 어떤 행사에 초대하시나요?</Label>
+                        <Select name="event_type" onChange={handleContextChange}>
+                            <option>개업식 / 오픈식</option>
+                            <option>VIP 고객 초청회</option>
+                            <option>기념식 / 창립행사</option>
+                            <option>개인 파티 / 행사</option>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>2. 행사 정보를 6하 원칙에 따라 입력해 주세요.</Label>
+                        <div className="space-y-2 p-3 bg-slate-100 rounded">
+                           <Input name="who" onChange={handleContextChange} placeholder="누가 (주최)" />
+                           <Input name="to_whom" onChange={handleContextChange} placeholder="누구에게 (초대 대상)" />
+                           <Input name="when" onChange={handleContextChange} placeholder="언제 (일시)" />
+                           <Input name="where" onChange={handleContextChange} placeholder="어디서 (장소)" />
+                           <Input name="what" onChange={handleContextChange} placeholder="무엇을 (행사명)" />
+                           <Input name="how" onChange={handleContextChange} placeholder="어떻게 (행사 내용, 드레스코드 등)" />
+                        </div>
+                    </div>
+                </div>);
+            case DesignType.Ticket:
+                 return (<div className="space-y-4">
+                     <div>
+                        <Label>1. 행사 정보를 입력해 주세요.</Label>
+                        <div className="space-y-2 p-3 bg-slate-100 rounded">
+                           <Input name="event_name" onChange={handleContextChange} placeholder="행사명" />
+                           <Input name="date_place" onChange={handleContextChange} placeholder="일시 및 장소" />
+                           <Input name="seat_info" onChange={handleContextChange} placeholder="좌석 정보 (예: R석, A구역, 자유석)" />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>2. 필수 가공 옵션을 선택해 주세요.</Label>
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2"><Input type="checkbox" name="use_numbering" id="use_numbering" onChange={e => handleContextChange(e)} /><Label htmlFor="use_numbering" className="mb-0">넘버링 (일련번호) 추가</Label></div>
+                            <div className="flex items-center gap-2"><Input type="checkbox" name="use_perforation" id="use_perforation" onChange={e => handleContextChange(e)} /><Label htmlFor="use_perforation" className="mb-0">절취선 (뜯는 선) 추가</Label></div>
+                        </div>
+                    </div>
+                </div>);
+            case DesignType.WindowSheeting:
+                 return (<div className="space-y-4">
+                    <div>
+                        <Label>1. 부착할 유리의 가로, 세로 사이즈를 알려주세요. (cm)</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                           <Input name="width_cm" type="number" onChange={handleContextChange} placeholder="가로 (cm)" />
+                           <Input name="height_cm" type="number" onChange={handleContextChange} placeholder="세로 (cm)" />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>2. 어떤 목적으로 사용하시나요?</Label>
+                        <Select name="purpose" onChange={handleContextChange}>
+                            <option>영업시간, 로고 등 정보 전달 (글자 커팅)</option>
+                            <option>신제품, 이벤트 등 이미지 홍보 (실사 출력)</option>
+                            <option>외부 시선 차단 / 인테리어 (안개 시트)</option>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>3. 부착 위치를 선택해 주세요. (중요)</Label>
+                        <Select name="attachment_direction" onChange={handleContextChange}>
+                            <option value="outside">유리 바깥쪽에 부착</option>
+                            <option value="inside">유리 안쪽에 부착 (밖에서 보이도록)</option>
+                        </Select>
+                         <p className="text-xs text-slate-500 mt-1">'내부 부착' 선택 시, 최종 결과물은 좌우 반전되어 생성됩니다.</p>
+                    </div>
+                </div>);
             case DesignType.BusinessCardFront:
             case DesignType.MobileBusinessCard:
                 return (<div className="grid grid-cols-2 gap-4">
@@ -152,35 +368,6 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
                     <div><Label>이메일</Label><Input name="email" type="email" onChange={handleContextChange} placeholder="minjun@example.com"/></div>
                     <div className="col-span-2"><Label>주소/웹사이트 (선택)</Label><Input name="address_website" onChange={handleContextChange} /></div>
                 </div>);
-            case DesignType.Poster:
-            case DesignType.Flyer:
-            case DesignType.Invitation:
-            case DesignType.Ticket:
-            case DesignType.POP:
-                return (<div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2"><Label>행사/제품명</Label><Input name="event_name" onChange={handleContextChange} placeholder="어반 그라인드 카페 오픈"/></div>
-                    <div><Label>날짜/시간</Label><Input name="date_time" onChange={handleContextChange} placeholder="8월 24일 오후 2시" /></div>
-                    <div><Label>장소</Label><Input name="location" onChange={handleContextChange} placeholder="서울시 커피구 향기로운 123" /></div>
-                </div>);
-            case DesignType.Banner:
-            case DesignType.Placard:
-                return (<div className="space-y-4">
-                    <div><Label>핵심 문구</Label><Input name="main_slogan" onChange={handleContextChange} /></div>
-                    <div><Label>보조 문구 (선택)</Label><Input name="sub_slogan" onChange={handleContextChange} /></div>
-                    <div><Label>후가공/설치방식</Label><Select name="finishing" onChange={handleContextChange}><option>타공 (아일렛)</option><option>봉 미싱</option><option>열재단</option></Select></div>
-                </div>);
-            case DesignType.CardNews:
-            case DesignType.Booklet:
-            case DesignType.Leaflet:
-                return (<div className="space-y-4">
-                    <div><Label>주제</Label><Input name="topic" onChange={handleContextChange} /></div>
-                    <div><Label>핵심 내용 (요약)</Label><Textarea name="content_summary" rows={4} onChange={handleContextChange} /></div>
-                    {baseDesignType === DesignType.Leaflet && <div><Label>접지 방식</Label><Select name="folding" onChange={handleContextChange}><option>2단 접지</option><option>3단 접지</option><option>대문 접지</option></Select></div>}
-                </div>);
-            case DesignType.VColoring:
-                return (<div><Label>테마/분위기</Label><Input name="theme" onChange={handleContextChange} placeholder="예: 차분하고 전문적인, 밝고 경쾌한" /></div>);
-            case DesignType.SeasonalGreeting:
-                 return (<div><Label>절기/명절</Label><Input name="holiday" onChange={handleContextChange} placeholder="예: 추석, 설날, 크리스마스" /></div>);
             case DesignType.Menu:
                 return (<div className="space-y-4">
                     <div><Label>음식점/카페 종류</Label><Input name="restaurant_type" onChange={handleContextChange} placeholder="예: 이탈리안 레스토랑, 베이커리 카페"/></div>
@@ -209,16 +396,6 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
                     <div><Label>그래픽 컨셉</Label><Input name="graphic_concept" onChange={handleContextChange} placeholder="예: 파도타는 고양이 일러스트"/></div>
                     <div><Label>제품 색상</Label><Select name="product_color" onChange={handleContextChange}><option>흰색</option><option>검정색</option><option>회색</option><option>네이비</option></Select></div>
                     {baseDesignType === DesignType.TShirt && <div><Label>인쇄 위치</Label><Select name="print_location" onChange={handleContextChange}><option>앞면 중앙</option><option>왼쪽 가슴</option><option>등판 중앙</option></Select></div>}
-                </div>);
-            case DesignType.WindowSheeting:
-                 return (<div className="space-y-4">
-                    <div><Label>부착 방식</Label>
-                        <Select name="attachment_direction" onChange={handleContextChange}>
-                            <option value="outside">외부 부착 (일반)</option>
-                            <option value="inside">내부 부착 (반전 인쇄)</option>
-                        </Select>
-                        <p className="text-xs text-slate-500 mt-1">'내부 부착' 선택 시, 밖에서 보이도록 안쪽에 붙이며 최종 결과물은 좌우 반전되어 생성됩니다.</p>
-                    </div>
                 </div>);
             default:
                 return <p>이 디자인 유형에는 추가 정보가 필요하지 않습니다.</p>;

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DesignProject, DesignType, DesignDocument, GenerationOption } from '../types';
 import { Card, CardHeader, Button } from './ui';
 import { SparklesIcon, SpinnerIcon, RedoIcon } from './icons';
-import { generateFullDesignPreviews, convertPreviewToEditableDocument } from '../services/geminiService';
+import { generateFullDesignPreviews, convertPreviewToEditableDocument } from '../services';
 import { getApiErrorMessage } from '../vicEdit/utils';
 
 interface GenerationViewProps {

@@ -19,7 +19,7 @@ const tools: { id: Tool; icon: React.ReactNode; label: string; shortcut: string 
 
 export const Toolbar: React.FC<ToolbarProps> = ({ activeTool, setActiveTool }) => {
     return (
-        <div className="w-16 bg-slate-50 p-2 flex flex-col items-center gap-2 border-r border-slate-200 flex-shrink-0">
+        <div className="w-16 bg-white p-2 flex flex-col items-center gap-2 border-r border-slate-200 flex-shrink-0">
             {tools.map(tool => (
                 <button 
                     key={tool.id} 

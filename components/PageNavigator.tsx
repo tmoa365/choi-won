@@ -12,7 +12,7 @@ interface PageNavigatorProps {
 
 export const PageNavigator: React.FC<PageNavigatorProps> = ({ pages, activePageIndex, onSelectPage, onAddPage, onDeletePage }) => {
     return (
-        <div className="flex-shrink-0 bg-slate-200 p-2 border-t border-slate-300">
+        <div className="flex-shrink-0 bg-white p-2 border-t border-slate-200">
             <div className="flex items-center gap-3 overflow-x-auto">
                 {pages.map((page, index) => (
                     <div key={page.id} className="relative flex-shrink-0 group">

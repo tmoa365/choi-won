@@ -4,7 +4,7 @@ import { getAvailableColorPalettes, TONE_AND_MANNERS, DESIGN_KEYWORDS } from '..
 import { Card, CardHeader, Label, Input, Select, Textarea, Button, Modal } from './ui';
 import { IdIcon, MegaphoneIcon, PaintBrushIcon, XCircleIcon, SparklesIcon, SpinnerIcon, LightbulbIcon, BookIcon, CameraIcon, CheckCircleIcon } from './icons';
 import { KOREAN_FONTS_LIST } from './fonts';
-import { generateDesignCopy, generateDesignConcepts, scanDesignFromImage } from '../services/geminiService';
+import { generateDesignCopy, generateDesignConcepts, scanDesignFromImage } from '../services';
 import { PARTY_BRANDING } from './brandAssets';
 import { getApiErrorMessage } from '../vicEdit/utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -143,14 +143,12 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
 
     const handleBrandColorChange = (index: number, color: string) => {
         const newColors = [...projectData.brandKit.colors];
-        // FIX: Update the 'value' property of the BrandColor object.
         newColors[index] = { ...newColors[index], value: color };
         updateBrandKit({ colors: newColors });
     };
 
     const addBrandColor = () => {
         if (projectData.brandKit.colors.length < 5) {
-            // FIX: Add a BrandColor object instead of a string.
             updateBrandKit({ colors: [...projectData.brandKit.colors, { id: uuidv4(), role: 'Accent', value: '#000000' }] });
         }
     };
@@ -163,7 +161,6 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
         const partyName = e.target.value;
         const partyBrand = PARTY_BRANDING[partyName];
         if (partyBrand) {
-            // FIX: Convert color strings to BrandColor[] and use logos array.
             const newBrandColors: BrandColor[] = Object.values(partyBrand.colors).map((colorValue, index) => ({
                 id: uuidv4(),
                 role: index === 0 ? 'Main' : 'Accent',
@@ -181,7 +178,6 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
             }));
         } else {
              updateProjectData(p => {
-                // FIX: Use logos array and preserve user-uploaded logos.
                 const userUploadedLogos = p.brandKit.logos.filter(logo => p.imageLibrary.some(img => img.id === logo.assetId));
                 return { ...p, brandKit: { ...p.brandKit, colors: [], logos: userUploadedLogos } };
              });
@@ -189,7 +185,6 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
     };
 
     const selectedPartyName = useMemo(() => {
-        // FIX: Use logos array to find the primary logo and determine the party.
         const primaryLogo = projectData.brandKit.logos.find(l => l.role === 'Primary Signature');
         const logoAssetId = primaryLogo?.assetId;
         if (!logoAssetId || !logoAssetId.startsWith('svg:')) return '';
@@ -198,7 +193,6 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
     }, [projectData.brandKit.logos]);
     
     const BrandLogoPreview: React.FC = () => {
-        // FIX: Use logos array to find and display the primary logo.
         const primaryLogo = projectData.brandKit.logos.find(l => l.role === 'Primary Signature');
         const logoAssetId = primaryLogo?.assetId;
         if (!logoAssetId) return <p className="text-xs text-slate-500">로고를 사용하려면 아래에서 로고를 선택하거나, 에디터의 '요소' 탭에서 이미지를 업로드하세요.</p>;
@@ -269,7 +263,7 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
                         <CardHeader title="브랜드 키트" subtitle="내 로고, 색상, 글꼴을 등록하여 일관된 디자인을 만드세요." icon={<BookIcon />}/>
                         <div className="space-y-4">
                            <div><Label htmlFor="partySelect">정당 선택 (선택 사항)</Label><Select id="partySelect" onChange={handlePartyChange} value={selectedPartyName}><option value="">선택 안함</option>{Object.keys(PARTY_BRANDING).filter(key => key !== '새누리당').map(name => (<option key={name} value={name}>{name}</option>))}</Select><p className="text-xs text-slate-500 mt-1">선택 시 해당 정당의 공식 로고와 색상이 자동 적용됩니다.</p></div>
-                           <div><Label>브랜드 색상 (최대 5개)</Label><div className="flex flex-wrap gap-2 items-center">{projectData.brandKit.colors.map((color, index) => (<div key={index} className="relative flex items-center"><Input type="color" value={color.value} onChange={(e) => handleBrandColorChange(index, e.target.value)} className="w-10 h-10 p-1" /><button onClick={() => removeBrandColor(index)} className="absolute -top-1 -right-1 bg-slate-600 text-white rounded-full p-0.5"><XCircleIcon className="w-4 h-4"/></button></div>))}{projectData.brandKit.colors.length < 5 && !selectedPartyName && (<button onClick={addBrandColor} className="w-10 h-10 border-2 border-dashed rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-600">+</button>)}</div></div>
+                           <div><Label>브랜드 색상 (최대 5개)</Label><div className="flex flex-wrap gap-2 items-center">{projectData.brandKit.colors.map((color, index) => (<div key={color.id} className="relative flex items-center"><Input type="color" value={color.value} onChange={(e) => handleBrandColorChange(index, e.target.value)} className="w-10 h-10 p-1" /><button onClick={() => removeBrandColor(index)} className="absolute -top-1 -right-1 bg-slate-600 text-white rounded-full p-0.5"><XCircleIcon className="w-4 h-4"/></button></div>))}{projectData.brandKit.colors.length < 5 && !selectedPartyName && (<button onClick={addBrandColor} className="w-10 h-10 border-2 border-dashed rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-600">+</button>)}</div></div>
                            <div><Label htmlFor="brandFontFamily">대표 글꼴</Label><Select name="brandFontFamily" id="brandFontFamily" value={projectData.brandKit.fonts.find(f => f.role === 'Headline')?.fontFamily || ''} onChange={e => {
                                 const newFontFamily = e.target.value;
                                 const newFonts = [...projectData.brandKit.fonts];
@@ -296,7 +290,6 @@ export const DesignBriefForm: React.FC<DesignBriefFormProps> = ({
                                    {projectData.imageLibrary.length > 0 ? (
                                      <div className="grid grid-cols-4 gap-2">
                                        {projectData.imageLibrary.map(asset => {
-                                         // FIX: Use logos array
                                          const primaryLogo = projectData.brandKit.logos.find(l => l.role === 'Primary Signature');
                                          return (
                                          <div 

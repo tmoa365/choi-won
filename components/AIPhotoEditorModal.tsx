@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ImageAsset } from '../types';
-import { removeBackgroundImage } from '../services/geminiService';
+import { removeBackgroundImage } from '../services';
 import { Button } from './ui';
 import { XCircleIcon, MagicWandIcon, SpinnerIcon } from './icons';
 import { dataURLtoFile, getApiErrorMessage } from '../vicEdit/utils';

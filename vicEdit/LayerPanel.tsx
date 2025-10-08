@@ -68,8 +68,8 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ layers, selectedLayerIds
     };
 
     return (
-        <div className="h-full w-full overflow-y-auto">
-            <div className="p-2 sticky top-0 bg-slate-50 border-b z-10">
+        <div className="h-full w-full overflow-y-auto bg-white">
+            <div className="p-2 sticky top-0 bg-white border-b border-slate-200 z-10">
                 <h3 className="font-bold text-sm text-slate-800">레이어</h3>
             </div>
             <div className="flex flex-col">

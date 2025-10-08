@@ -34,7 +34,6 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (
     focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 ${props.className || ''}`} />
 );
 
-// Fix: Update Textarea to forward refs to the underlying textarea element.
 export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>((props, ref) => (
   <textarea {...props} ref={ref} className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm placeholder-slate-400
     focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 ${props.className || ''}`} />

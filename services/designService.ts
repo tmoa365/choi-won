@@ -1,334 +1,12 @@
-import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
-import { DesignBrief, DesignPage, DesignType, TextLayer, ImageLayer, ShapeLayer, DesignConcept, DesignProject, DesignDocument, ImageAsset, GenerationOption, AllLayer, BrandKit } from '../types';
+import { GenerateContentResponse, Type, Modality } from "@google/genai";
 import { v4 as uuidv4 } from 'uuid';
-import { DESIGN_KEYWORDS, MATERIAL_DIMENSIONS, TONE_AND_MANNERS, getAvailableColorPalettes } from "../constants";
+import { ai } from "./geminiClient";
+import { generateImage, editImageWithText } from "./imageService";
+import { DesignPage, DesignType, TextLayer, ImageLayer, ShapeLayer, DesignProject, DesignDocument, GenerationOption, AllLayer, BrandKit } from '../types';
+import { MATERIAL_DIMENSIONS, TONE_AND_MANNERS } from "../constants";
 import { mmToPx, ptToPx, fileToDataURL } from "../vicEdit/utils";
 import { BANNER_DESIGN_PRINCIPLES, BUSINESS_CARD_BACK_PRINCIPLES, BUSINESS_CARD_FRONT_PRINCIPLES } from "../components/designPrinciples";
 import { KOREAN_FONTS_LIST } from "../components/fonts";
-
-
-const API_KEY = process.env.API_KEY;
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable is not set.");
-}
-
-const tmoaStudio = new GoogleGenAI({ apiKey: API_KEY });
-
-const COPY_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        bodyText: {
-            type: Type.STRING,
-            description: "Compelling body text for the design. Could be a slogan, a description, or a list of services. Should be concise and impactful. Use newline characters (\\n) for line breaks."
-        },
-        contactInfo: {
-            type: Type.STRING,
-            description: "Well-formatted contact information. Include placeholders if specific info isn't provided. Use newline characters (\\n) for line breaks. Example: 'Tel: 010-1234-5678\\nEmail: contact@example.com'"
-        },
-    },
-    required: ['bodyText', 'contactInfo']
-};
-
-export const generateDesignCopy = async (designBrief: DesignBrief): Promise<{ bodyText: string; contactInfo: string }> => {
-    const toneAndMannerDesc = TONE_AND_MANNERS[designBrief.toneAndManner] || 'professional';
-    
-    const refinementInstruction = (designBrief.bodyText || designBrief.contactInfo) 
-        ? `The user has provided some initial text. Your task is to refine and improve it, or provide a completely new, better alternative if the existing text is weak.
-        - Existing Body Text: "${designBrief.bodyText}"
-        - Existing Contact Info: "${designBrief.contactInfo}"`
-        : `Your task is to generate compelling "body text" and "contact information" from scratch.`;
-
-    const prompt = `
-        You are an expert copywriter creating content for a design project.
-
-        **Project Details:**
-        - **Title:** ${designBrief.title}
-        - **Subtitle:** ${designBrief.subtitle || 'Not provided'}
-        - **Core Keywords:** ${designBrief.keywords.join(', ')}
-        - **Desired Tone & Manner:** ${toneAndMannerDesc}
-
-        **Instructions:**
-        1.  ${refinementInstruction}
-        2.  Based on the project details, write a concise and effective **body text**. This could be a slogan, a short description, key features, or an event detail. It should be engaging and fit the specified tone.
-        3.  Create a well-formatted **contact information** block. If specific details are missing, use logical placeholders like '전화번호' (Phone Number), '주소' (Address), '웹사이트' (Website), etc.
-        4.  Use newline characters (\\n) for clear line breaks in both fields.
-        5.  Your response MUST be a JSON object conforming to the provided schema. Do not include any other text or explanations.
-    `;
-
-    try {
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: COPY_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
-    } catch (error) {
-        console.error('Error generating design copy:', error);
-        throw new Error("Failed to generate AI copy. The model may have returned an invalid format.");
-    }
-};
-
-const BRIEF_EXPANSION_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING, description: "A catchy and professional title for the design project based on the user's idea." },
-        subtitle: { type: Type.STRING, description: "A supportive subtitle that complements the title." },
-        bodyText: { type: Type.STRING, description: "A well-written, concise body text or slogan for the design. Use newline characters (\\n) for line breaks." },
-        contactInfo: { type: Type.STRING, description: "Formatted contact information with logical placeholders if details are missing. Use newline characters (\\n) for line breaks." },
-        keywords: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "An array of exactly 3 relevant keywords from the provided list that best capture the essence of the idea."
-        },
-        colorPalette: {
-            type: Type.STRING,
-            description: "The most fitting color palette for this concept from the provided list."
-        },
-        toneAndManner: {
-            type: Type.STRING,
-            description: "The most fitting tone and manner for this concept from the provided list."
-        },
-        fontFamily: {
-            type: Type.STRING,
-            description: "The most appropriate font family for the main title from the provided list."
-        }
-    },
-    required: ['title', 'subtitle', 'bodyText', 'contactInfo', 'keywords', 'colorPalette', 'toneAndManner', 'fontFamily']
-};
-
-
-export const expandBriefFromIdea = async (idea: string, designType: DesignType, context: Record<string, string> = {}): Promise<DesignBrief> => {
-    
-    const contextString = Object.entries(context).filter(([, value]) => value).map(([key, value]) => `- ${key}: ${value}`).join('\n');
-
-    const prompt = `
-        You are an expert Creative Director. A user has provided a simple idea for a specific design type and some context. Your task is to expand this into a complete, professional design brief.
-
-        **User's Idea:** "${idea}"
-        **Design Type:** "${designType}"
-        **User-provided Information:**
-        ${contextString || "No specific information provided yet."}
-
-        **Available Options for your response:**
-        - **Keywords:** ${DESIGN_KEYWORDS.join(', ')}
-        - **Color Palettes:** ${Object.keys(getAvailableColorPalettes()).join(', ')}
-        - **Tone & Manner:** ${Object.keys(TONE_AND_MANNERS).join(', ')}
-        - **Font Families:** ${KOREAN_FONTS_LIST.map(f => f.name).join(', ')}
-
-        **Instructions:**
-        1.  Analyze the user's idea, design type, and provided information to understand the subject, purpose, and audience.
-        2.  Create a compelling **title** and **subtitle**. These MUST incorporate the user's information. For example, if the design type is a business card and the user provided a name and title, use those.
-        3.  Write a concise and effective **bodyText** and **contactInfo**, using the user's information and adding logical placeholders where needed. Use '\\n' for line breaks.
-        4.  Select exactly 3 of the most relevant **keywords** from the list.
-        5.  Select the most fitting **colorPalette**, **toneAndManner**, and **fontFamily** from the provided lists.
-        6.  Your response MUST be a single JSON object that strictly conforms to the provided schema. Do not include any other text, markdown, or explanations.
-    `;
-
-     try {
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: BRIEF_EXPANSION_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
-    } catch (error) {
-        console.error('Error expanding brief from idea:', error);
-        throw new Error("Failed to generate AI brief. The model may have returned an invalid format.");
-    }
-};
-
-const CONCEPTS_SCHEMA = {
-    type: Type.ARRAY,
-    items: {
-        type: Type.OBJECT,
-        properties: {
-            title: { type: Type.STRING, description: "A catchy and creative title for the design concept." },
-            subtitle: { type: Type.STRING, description: "A supportive subtitle that complements the title." },
-            description: { type: Type.STRING, description: "A brief, one-sentence explanation of the concept's creative direction in Korean." },
-            keywords: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "An array of up to 3 relevant keywords from the provided list."
-            },
-            toneAndManner: {
-                type: Type.STRING,
-                description: "The most fitting tone and manner for this concept from the provided list."
-            }
-        },
-        required: ['title', 'subtitle', 'description', 'keywords', 'toneAndManner']
-    }
-};
-
-export const generateDesignConcepts = async (idea: string): Promise<DesignConcept[]> => {
-    const prompt = `
-        You are a brilliant Creative Director specializing in branding and marketing. Your task is to brainstorm three distinct and compelling design concepts based on a user's simple idea.
-
-        **User's Idea:** "${idea}"
-
-        **Your Task:**
-        Generate an array of 3 unique JSON objects, each representing a design concept.
-
-        **Available Options for your response:**
-        - **Keywords:** ${Object.keys(DESIGN_KEYWORDS).join(', ')}
-        - **Tone & Manner:** ${Object.keys(TONE_AND_MANNERS).join(', ')}
-
-        **Instructions:**
-        1.  For each concept, create a catchy **title** and a supportive **subtitle** in Korean.
-        2.  Write a short **description** (in Korean, 1-2 sentences) explaining the creative direction and target audience for each concept.
-        3.  Select up to 3 relevant **keywords** for each concept from the provided list.
-        4.  Select the most fitting **toneAndManner** for each concept from the provided list.
-        5.  Your entire response MUST be a single JSON object (an array) that strictly conforms to the provided schema. Do not include any other text, markdown, or explanations.
-    `;
-
-    try {
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: CONCEPTS_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
-    } catch (error) {
-        console.error('Error generating design concepts:', error);
-        throw new Error("Failed to generate AI concepts. The model may have returned an invalid format.");
-    }
-};
-
-
-const generateImage = async (prompt: string, aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9' = '3:4') => {
-    try {
-        const response = await tmoaStudio.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt,
-            config: {
-                numberOfImages: 1,
-                outputMimeType: 'image/png',
-                aspectRatio: aspectRatio,
-            },
-        });
-        
-        if (response.generatedImages && response.generatedImages.length > 0) {
-            return response.generatedImages[0].image.imageBytes;
-        }
-        throw new Error("Image generation failed, no image returned.");
-    } catch (error) {
-        console.error('Error generating image:', error);
-        throw error;
-    }
-};
-
-export const generateInArea = async (prompt: string, width: number, height: number): Promise<string> => {
-    const aspectRatioValue = width / height;
-    const supportedRatios = {
-        '1:1': 1, '3:4': 0.75, '4:3': 1.333, '9:16': 0.5625, '16:9': 1.777
-    };
-    
-    let closestRatio: keyof typeof supportedRatios = '1:1';
-    let minDiff = Infinity;
-
-    for (const key in supportedRatios) {
-        const ratio = supportedRatios[key as keyof typeof supportedRatios];
-        const diff = Math.abs(aspectRatioValue - ratio);
-        if (diff < minDiff) {
-            minDiff = diff;
-            closestRatio = key as keyof typeof supportedRatios;
-        }
-    }
-
-    try {
-        const fullPrompt = `Create a high-quality, photorealistic image based on the user's prompt: "${prompt}". 
-        The image should be self-contained and fit well within its boundaries. 
-        Do not include any text unless explicitly requested.`;
-
-        const response = await tmoaStudio.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: fullPrompt,
-            config: {
-                numberOfImages: 1,
-                outputMimeType: 'image/png',
-                aspectRatio: closestRatio,
-            },
-        });
-        
-        if (response.generatedImages && response.generatedImages.length > 0) {
-            return response.generatedImages[0].image.imageBytes;
-        }
-        throw new Error("Image generation for area failed, no image returned.");
-    } catch (error) {
-        console.error('Error generating image in area:', error);
-        throw error;
-    }
-};
-
-
-const generateImageFromImageAndText = async (prompt: string, imageBase64: string): Promise<string> => {
-    try {
-        const imagePart = { inlineData: { data: imageBase64, mimeType: 'image/png' } };
-        const textPart = { text: prompt };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [imagePart, textPart] },
-            config: {
-                responseModalities: [Modality.IMAGE, Modality.TEXT],
-            },
-        });
-        
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return part.inlineData.data;
-            }
-        }
-        throw new Error("AI image generation from image failed, no image was returned.");
-    } catch (error) {
-        console.error('Error generating image from image and text:', error);
-        throw error;
-    }
-};
-
-export const generateDesignElement = async (prompt: string): Promise<string> => {
-    try {
-        const fullPrompt = `Create a high-quality, simple, flat, vector-style icon based on the following request: "${prompt}".
-        - The background MUST be transparent (real alpha channel).
-        - CRITICAL: Do NOT draw a checkerboard pattern to simulate transparency. The background must not contain any patterns.
-        - The icon should be modern, clean, and suitable for a graphic design project.
-        - Avoid complex details, text, letters, or numbers.
-        - The main object should be centered.`;
-
-        const response = await tmoaStudio.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: fullPrompt,
-            config: {
-                numberOfImages: 1,
-                outputMimeType: 'image/png',
-                aspectRatio: '1:1',
-            },
-        });
-        
-        if (response.generatedImages && response.generatedImages.length > 0) {
-            return response.generatedImages[0].image.imageBytes;
-        }
-        throw new Error("AI Element generation failed, no image was returned.");
-    } catch (error) {
-        console.error('Error generating AI element:', error);
-        throw error;
-    }
-};
-
 
 const LAYOUT_SCHEMA = {
     type: Type.OBJECT,
@@ -412,7 +90,7 @@ const generateLayoutFromPrompt = async (prompt: string, imageBase64?: string): P
             parts.push({ inlineData: { mimeType: 'image/png', data: imageBase64 } });
         }
 
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
+        const response: GenerateContentResponse = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: { parts },
             config: {
@@ -565,7 +243,6 @@ ${brandPrompt}`;
     }
 };
 
-
 export const generateFullDesignPreviews = async (designType: DesignType, projectData: DesignProject, numberOfImages: number = 3): Promise<string[]> => {
     const imagePrompt = getPreviewImagePrompts(projectData)[designType];
     const aspectRatio = getAspectRatio(designType);
@@ -578,7 +255,7 @@ export const generateFullDesignPreviews = async (designType: DesignType, project
         const imageBase64 = dataUrl.split(',')[1];
         
         const generationPromises = Array(numberOfImages).fill(0).map(() => 
-            generateImageFromImageAndText(imagePrompt, imageBase64)
+            editImageWithText(imagePrompt, imageBase64)
         );
         const results = await Promise.all(generationPromises);
         return results;
@@ -752,7 +429,7 @@ export const convertPreviewToEditableDocument = async (
     Then, create a brand new, clean background image that captures the essential style of the original background, but contains ABSOLUTELY NO text, logos, or foreground elements.
     The final output MUST be only the clean background image. Do not add any text, elements, or explanations.`;
     
-    const backgroundResponse = await tmoaStudio.models.generateContent({
+    const backgroundResponse = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [
             { inlineData: { data: previewBase64, mimeType: 'image/png' } },
@@ -813,30 +490,6 @@ export const convertPreviewToEditableDocument = async (
     }
 };
 
-
-
-export const searchImages = async (query: string): Promise<string[]> => {
-    const prompt = `A professional, high-quality, photorealistic stock photo for a marketing campaign. The photo should represent: "${query}".
-    - Style: Clean, modern, well-lit, visually appealing.
-    - IMPORTANT: Do NOT include any text, letters, logos, or watermarks in the image.`;
-    try {
-        const response = await tmoaStudio.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: prompt,
-            config: {
-                numberOfImages: 4,
-                outputMimeType: 'image/png',
-                aspectRatio: '4:3',
-            },
-        });
-        
-        return response.generatedImages?.map(img => img.image.imageBytes) || [];
-    } catch (error) {
-        console.error('Error searching images:', error);
-        throw error;
-    }
-};
-
 export const adaptDesign = async (originalPage: DesignPage, targetType: DesignType, projectData: DesignProject): Promise<DesignDocument> => {
     // 1. Generate a new background that is consistent with the original
     const originalPrompt = getPreviewImagePrompts(projectData)[originalPage.type];
@@ -869,122 +522,6 @@ export const adaptDesign = async (originalPage: DesignPage, targetType: DesignTy
     return adaptedDocument;
 };
 
-export const editBackgroundImage = async (base64ImageData: string, prompt: string): Promise<string> => {
-    try {
-        const imagePart = {
-            inlineData: {
-                data: base64ImageData,
-                mimeType: 'image/png', // Assuming PNG from previous steps
-            },
-        };
-        const textPart = { text: prompt };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [imagePart, textPart] },
-            config: {
-                responseModalities: [Modality.IMAGE, Modality.TEXT],
-            },
-        });
-        
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return part.inlineData.data;
-            }
-        }
-        throw new Error("AI image editing failed, no image was returned in the response.");
-    } catch (error) {
-        console.error('Error editing background image:', error);
-        throw error;
-    }
-};
-
-export const removeBackgroundImage = async (base64ImageData: string, mimeType: string): Promise<string> => {
-    try {
-        const imagePart = {
-            inlineData: {
-                data: base64ImageData,
-                mimeType: mimeType,
-            },
-        };
-        const textPart = {
-            text: 'Analyze the main subject of this image and create a new version with the background completely removed, resulting in a transparent background. The resulting background must be true transparency (alpha channel), not a checkerboard pattern. Only return the edited image, do not add any text.',
-        };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [imagePart, textPart] },
-            config: {
-                responseModalities: [Modality.IMAGE, Modality.TEXT],
-            },
-        });
-        
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return part.inlineData.data;
-            }
-        }
-        throw new Error("Background removal failed, no image was returned in the response.");
-    } catch (error) {
-        console.error('Error removing background:', error);
-        throw error;
-    }
-};
-
-export const generateAltText = async (base64ImageData: string): Promise<string> => {
-    try {
-        const imagePart = { inlineData: { data: base64ImageData, mimeType: 'image/png' } };
-        const textPart = { text: "시각 장애 사용자를 위해 이 이미지에 대한 간결하고 설명적인 대체 텍스트를 한국어로 제공해주세요." };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: { parts: [imagePart, textPart] },
-        });
-
-        return response.text.trim();
-    } catch (error) {
-        console.error('Error generating alt text:', error);
-        throw new Error("Failed to generate alt text.");
-    }
-};
-
-const COLOR_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        colors: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING, description: "A hexadecimal color code string." },
-            description: "An array of 4-5 dominant hexadecimal color codes from the image."
-        }
-    },
-    required: ['colors']
-};
-
-export const extractColorsFromImage = async (base64ImageData: string): Promise<string[]> => {
-    try {
-        const imagePart = { inlineData: { data: base64ImageData, mimeType: 'image/png' } };
-        const textPart = { text: "이 이미지를 분석하고 가장 지배적이고 대표적인 색상 4-5개를 추출합니다. JSON 객체에 16진수 색상 코드 배열로 반환합니다." };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: { parts: [imagePart, textPart] },
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: COLOR_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        const colors: string[] = result.colors || [];
-        // Validate that the returned colors are valid hex codes
-        return colors.filter(color => /^#[0-9A-F]{6}$/i.test(color));
-    } catch (error) {
-        console.error('Error extracting colors from image:', error);
-        throw new Error("Failed to extract colors from image.");
-    }
-};
-
 export const scanDesignFromImage = async (
     imageBase64: string,
     targetType: DesignType,
@@ -1013,85 +550,6 @@ export const scanDesignFromImage = async (
         name: `${targetType} (스캔됨)`, 
         pages: [page] 
     };
-};
-
-const FONT_SUGGESTION_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        fontFamily: { type: Type.STRING, description: "The name of the suggested font from the provided list." },
-        fontWeight: { type: Type.NUMBER, description: "The suggested numeric font weight available for the chosen font." },
-    },
-    required: ['fontFamily', 'fontWeight']
-};
-
-export const suggestFont = async (
-    targetLayer: TextLayer, 
-    allLayers: TextLayer[], 
-    designBrief: DesignBrief
-): Promise<{fontFamily: string; fontWeight: number;}> => {
-    const otherLayers = allLayers.filter(l => l.id !== targetLayer.id);
-    const prompt = `
-        You are an expert typographer. Your task is to suggest a font family and weight for a specific text layer within a design, ensuring it creates a harmonious and effective hierarchy with other text elements.
-
-        **Design Brief:**
-        - **Tone & Manner:** ${TONE_AND_MANNERS[designBrief.toneAndManner]}
-        - **Keywords:** ${designBrief.keywords.join(', ')}
-
-        **Target Layer to Improve:**
-        - **Current Content:** "${targetLayer.content}"
-        - **Description:** This layer appears to be a ${targetLayer.fontSize > 40 ? 'main title or headline' : targetLayer.fontSize > 20 ? 'subtitle or subheading' : 'body text or caption'}.
-        - **Current Font:** ${targetLayer.fontFamily} at ${targetLayer.fontWeight} weight.
-
-        **Other Text Layers for Context:**
-        ${JSON.stringify(otherLayers.map(l => ({ content: l.content, font: l.fontFamily, size: l.fontSize })), null, 2)}
-
-        **Available Fonts and Their Characteristics:**
-        ${JSON.stringify(KOREAN_FONTS_LIST.map(f => ({ name: f.name, weights: f.weights, style: f.style, description: f.description })), null, 2)}
-        
-        **Instruction:**
-        Based on all the provided information, choose the BEST font family and an appropriate font weight from the "Available Fonts" list for the "Target Layer". Your choice should enhance readability and align with the overall design brief. Return your suggestion as a JSON object.
-    `;
-
-    try {
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: FONT_SUGGESTION_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
-    } catch (error) {
-        console.error('Error suggesting font:', error);
-        throw new Error("Failed to suggest font.");
-    }
-};
-
-export const cropImageWithAI = async (base64ImageData: string, mimeType: string): Promise<string> => {
-    const prompt = 'Identify the main subject of this image and crop the image to focus tightly on it, maintaining the original aspect ratio. Return only the final, cropped image. If the original image had a transparent background, the cropped image must also have a real transparent background (alpha channel), not a checkerboard pattern.';
-    try {
-        const response = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [
-                { inlineData: { data: base64ImageData, mimeType } },
-                { text: prompt },
-            ]},
-            config: { responseModalities: [Modality.IMAGE, Modality.TEXT] },
-        });
-
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return part.inlineData.data;
-            }
-        }
-        throw new Error("AI smart crop failed, no image was returned.");
-    } catch (error) {
-        console.error('Error with AI smart crop:', error);
-        throw error;
-    }
 };
 
 const getRefinementPrompt = (page: DesignPage, project: DesignProject, refinementPrompt: string): string => {
@@ -1131,51 +589,6 @@ const getRefinementPrompt = (page: DesignPage, project: DesignProject, refinemen
 export const refinePageLayout = async (page: DesignPage, project: DesignProject, refinementPrompt: string): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
     const layout = await generateLayoutFromPrompt(getRefinementPrompt(page, project, refinementPrompt));
     return { textLayers: layout.textLayers, imageLayers: layout.imageLayers, shapeLayers: layout.shapeLayers };
-};
-
-const TEXT_REFINEMENT_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        refinedText: {
-            type: Type.STRING,
-            description: "The improved and refined version of the user's text, based on their instruction."
-        }
-    },
-    required: ['refinedText']
-};
-
-export const refineTextContent = async (textToRefine: string, instruction: string): Promise<string> => {
-    const prompt = `
-        You are an expert copywriter. A user wants to refine a piece of text based on their instruction.
-
-        **Original Text:**
-        "${textToRefine}"
-
-        **User's Instruction:**
-        "${instruction}"
-
-        **Your Task:**
-        Rewrite the "Original Text" according to the "User's Instruction". The new text should be well-written, clear, and fulfill the user's goal.
-        Return the result as a JSON object with a single key "refinedText".
-    `;
-
-    try {
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: TEXT_REFINEMENT_SCHEMA,
-            },
-        });
-
-        const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        return result.refinedText || textToRefine;
-    } catch (error) {
-        console.error('Error refining text content:', error);
-        throw new Error("Failed to refine text content.");
-    }
 };
 
 const getMagicWandPrompt = (
@@ -1238,64 +651,5 @@ export const executeMagicWandAction = async (
     } catch (error) {
         console.error("Error executing Magic Wand action:", error);
         throw new Error("AI Magic Wand action failed.");
-    }
-};
-
-export const expandImageWithAI = async (
-    base64ImageData: string, 
-    mimeType: string, 
-    targetWidth: number, 
-    targetHeight: number, 
-    prompt: string
-): Promise<string> => {
-    try {
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-            const i = new Image();
-            i.onload = () => resolve(i);
-            i.onerror = reject;
-            i.src = `data:${mimeType};base64,${base64ImageData}`;
-        });
-
-        const { naturalWidth, naturalHeight } = img;
-        
-        const canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error("Could not get canvas context");
-
-        const drawX = (targetWidth - naturalWidth) / 2;
-        const drawY = (targetHeight - naturalHeight) / 2;
-
-        ctx.drawImage(img, drawX, drawY, naturalWidth, naturalHeight);
-
-        const compositeBase64 = canvas.toDataURL('image/png').split(',')[1];
-
-        const fullPrompt = `You are an AI image editor. The user has provided an image placed on a larger transparent canvas. 
-        Your task is to fill the surrounding transparent area, seamlessly extending the original image to create a larger picture. 
-        Match the style, lighting, and content of the original image perfectly. The final image should have no transparency.
-        User's additional instruction: "${prompt || 'Continue the image naturally.'}"`;
-
-        const imagePart = { inlineData: { data: compositeBase64, mimeType: 'image/png' } };
-        const textPart = { text: fullPrompt };
-
-        const response: GenerateContentResponse = await tmoaStudio.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [imagePart, textPart] },
-            config: {
-                responseModalities: [Modality.IMAGE, Modality.TEXT],
-            },
-        });
-
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return part.inlineData.data;
-            }
-        }
-        throw new Error("AI image expansion failed, no image was returned.");
-
-    } catch (error) {
-        console.error("Error in expandImageWithAI:", error);
-        throw new Error("Failed to expand image with AI.");
     }
 };

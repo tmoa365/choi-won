@@ -5,7 +5,7 @@ import { InspectorPanel } from './InspectorPanel';
 import { LeftPanel } from './LeftPanel';
 import { buildAssetUrlMap, dataURLtoFile, mmToPx, getApiErrorMessage } from './utils';
 import { v4 as uuidv4 } from 'uuid';
-import { suggestFont, generateInArea, refinePageLayout, refineTextContent, removeBackgroundImage, cropImageWithAI, generateAltText, extractColorsFromImage, executeMagicWandAction, expandImageWithAI } from '../services/geminiService';
+import { suggestFont, generateInArea, refinePageLayout, refineTextContent, removeBackgroundImage, cropImageWithAI, generateAltText, extractColorsFromImage, executeMagicWandAction, expandImageWithAI } from '../services';
 import { PageNavigator } from '../components/PageNavigator';
 import { Toolbar, Tool } from './Toolbar';
 import { AiGenerateModal } from '../components/AiGenerateModal';
@@ -350,7 +350,7 @@ export const Editor: React.FC<EditorProps> = (props) => {
         });
     }, [selectedLayers.length, selectedLayerIds, page, onPageUpdate]);
 
-    const handleGroup = () => {
+    const handleGroup = useCallback(() => {
         if (selectedLayerIds.length <= 1) return;
         const newGroup: Group = { id: uuidv4(), name: `그룹 ${ (page.groups?.length || 0) + 1}`};
         const newGroups = [...(page.groups || []), newGroup];
@@ -362,9 +362,9 @@ export const Editor: React.FC<EditorProps> = (props) => {
             imageLayers: page.imageLayers.map(updater),
             shapeLayers: page.shapeLayers.map(updater),
         });
-    };
+    }, [onPageUpdate, page, selectedLayerIds]);
 
-    const handleUngroup = () => {
+    const handleUngroup = useCallback(() => {
         const groupId = selectedLayers[0]?.groupId;
         if (!groupId) return;
 
@@ -377,7 +377,8 @@ export const Editor: React.FC<EditorProps> = (props) => {
             imageLayers: page.imageLayers.map(updater),
             shapeLayers: page.shapeLayers.map(updater),
         });
-    };
+        setSelectedLayerIds(selectedLayerIds.filter(id => allLayers.find(l => l.id === id)?.groupId === groupId));
+    }, [page, onPageUpdate, selectedLayers, setSelectedLayerIds, selectedLayerIds, allLayers]);
     
     const activateEyedropper = (callback: (color: string) => void) => {
         setEyedropperState({ callback });
@@ -510,7 +511,6 @@ export const Editor: React.FC<EditorProps> = (props) => {
                             reader.onerror = rej;
                         });
                         const colors = await extractColorsFromImage(base64);
-                        // FIX: Convert color strings to BrandColor objects and handle uniqueness.
                         updateProjectData(p => {
                             const existingColorValues = new Set(p.brandKit.colors.map(c => c.value));
                             const newBrandColors = colors
@@ -642,6 +642,23 @@ export const Editor: React.FC<EditorProps> = (props) => {
         setIsDataDrivenModalOpen(false);
         onDocumentCreationCloseEditor(); // Navigate home
     };
+    
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+             const target = e.target as HTMLElement;
+             if (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+            switch(e.key) {
+                case 'Delete': case 'Backspace': deleteSelectedLayers(); break;
+                case 'c': if(e.metaKey || e.ctrlKey) handleCopy(); break;
+                case 'v': if(e.metaKey || e.ctrlKey) handlePaste(); break;
+                case 'g': if(e.metaKey || e.ctrlKey) { e.preventDefault(); handleGroup(); } break;
+                case 'G': if(e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); handleUngroup(); } break;
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [deleteSelectedLayers, handleCopy, handlePaste, handleGroup, handleUngroup]);
+
 
     return (
         <div className="w-full h-full flex flex-col bg-slate-200 overflow-hidden">
@@ -684,7 +701,6 @@ export const Editor: React.FC<EditorProps> = (props) => {
                     onAiAreaSelected={handleAiAreaSelected}
                     projectData={projectData}
                     onGroup={handleGroup}
-                    // FIX: Pass handleUngroup instead of onUngroup
                     onUngroup={handleUngroup}
                     onPageUpdate={onPageUpdate}
                     onAiAction={handleContextMenuAiAction}

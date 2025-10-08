@@ -378,11 +378,11 @@ export const Canvas: React.FC<CanvasProps> = ({
                      </div>
                 )}
                  {isInitialBrief && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="bg-black/60 text-white p-6 rounded-lg text-center max-w-md">
-                            <SparklesIcon className="w-12 h-12 mx-auto text-yellow-300"/>
-                            <h3 className="text-xl font-bold mt-4">AI 디자인을 시작해 보세요!</h3>
-                            <p className="mt-2">왼쪽의 '프로젝트 브리핑' 패널에서 디자인 정보를 입력하여 AI 시안 생성을 시작하거나, 툴바의 도구를 사용하여 직접 디자인을 시작할 수 있습니다.</p>
+                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="bg-slate-800/80 backdrop-blur-md p-12 rounded-2xl text-center max-w-xl shadow-xl border border-slate-700/50">
+                            <SparklesIcon className="w-16 h-16 mx-auto text-yellow-400"/>
+                            <h3 className="text-2xl font-bold mt-6 text-white">AI 디자인을 시작해 보세요!</h3>
+                            <p className="mt-4 text-slate-300">왼쪽의 '프로젝트 브리핑' 패널에서 디자인 정보를 입력하여 AI 시안 생성을 시작하거나, 툴바의 도구를 사용하여 직접 디자인을 시작할 수 있습니다.</p>
                         </div>
                     </div>
                 )}
