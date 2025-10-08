@@ -1,0 +1,5 @@
+{
+  "name": "AI 디자인 스튜디오 (AI Design Studio)",
+  "description": "프로젝트 정보, 텍스트, 이미지를 입력하면 포스터, 소셜 미디어 카드, 명함 등 다양한 목적에 맞는 고해상도 인쇄용 및 디지털용 디자인을 즉시 생성합니다.",
+  "requestFramePermissions": []
+}
