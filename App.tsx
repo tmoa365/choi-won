@@ -45,6 +45,9 @@ const initialProjectData: DesignProject = {
       logos: [],
       colors: [],
       fonts: [],
+      logoClearspace: 0.2,
+      logoMinimumSize: 50,
+      usageRules: '로고의 비율을 변경하지 마세요.',
     }
 };
 
@@ -81,6 +84,11 @@ const migrateProjectData = (data: any): DesignProject => {
         }
         data.brandKit = newBrandKit;
     }
+    // Add new brandkit properties if they don't exist
+    data.brandKit.logoClearspace = data.brandKit.logoClearspace ?? initialProjectData.brandKit.logoClearspace;
+    data.brandKit.logoMinimumSize = data.brandKit.logoMinimumSize ?? initialProjectData.brandKit.logoMinimumSize;
+    data.brandKit.usageRules = data.brandKit.usageRules ?? initialProjectData.brandKit.usageRules;
+    
     if (data.generatedImages && !data.documents) {
         const migratedDocs: DesignDocument[] = [];
         const businessCardPairs: { [key: string]: any[] } = {};
@@ -376,7 +384,7 @@ export function App() {
     }
   };
 
-  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -546,8 +554,9 @@ export function App() {
             projectData={projectData}
             onClose={() => setWizardState({ isOpen: false, initialIdea: '', designType: null })}
             onDesignCreated={(newDoc, newBrief) => {
-                updateProjectData(p => ({...p, designBrief: newBrief }));
-                handleDesignCreatedFromGeneration(newDoc);
+                updateProjectData(p => ({...p, designBrief: newBrief, documents: [newDoc, ...p.documents] }));
+                setEditingDocumentId(newDoc.id);
+                setCurrentView('editor');
                 setWizardState({ isOpen: false, initialIdea: '', designType: null });
             }}
             setError={setError}

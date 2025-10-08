@@ -58,4 +58,7 @@ export const MATERIAL_DIMENSIONS: { [key in DesignType]: { width_mm: number; hei
   [DesignType.EcoBag]: { width_mm: 260, height_mm: 300 },
   [DesignType.Cap]: { width_mm: 120, height_mm: 60 },
   [DesignType.Pouch]: { width_mm: 180, height_mm: 120 },
+  // Stage 3
+  [DesignType.ProductBox]: { width_mm: 157, height_mm: 157 }, // Example cosmetics box
+  [DesignType.WindowSheeting]: { width_mm: 1000, height_mm: 500 },
 };

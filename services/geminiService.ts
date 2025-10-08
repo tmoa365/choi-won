@@ -36,7 +36,7 @@ export const generateDesignCopy = async (designBrief: DesignBrief): Promise<{ bo
         ? `The user has provided some initial text. Your task is to refine and improve it, or provide a completely new, better alternative if the existing text is weak.
         - Existing Body Text: "${designBrief.bodyText}"
         - Existing Contact Info: "${designBrief.contactInfo}"`
-        : `Your task is to generate compelling "body text" and formatted "contact information" from scratch.`;
+        : `Your task is to generate compelling "body text" and "contact information" from scratch.`;
 
     const prompt = `
         You are an expert copywriter creating content for a design project.
@@ -470,6 +470,16 @@ const getBrandKitPrompt = (project: DesignProject): string => {
     const primaryLogo = brandKit.logos.find(l => l.role === 'Primary Signature');
     if (primaryLogo) {
         prompt += `\n- The design MUST include a placeholder for the brand logo. Use 'brand_logo' as the assetId for this image layer.`;
+        if (brandKit.logoClearspace) {
+            prompt += `\n- Logo Clearspace Rule: You MUST maintain a minimum empty space around the logo, equal to ${brandKit.logoClearspace}% of the logo's width.`;
+        }
+        if (brandKit.logoMinimumSize) {
+            prompt += `\n- Logo Minimum Size Rule: The logo's width MUST NOT be smaller than ${brandKit.logoMinimumSize}px.`;
+        }
+    }
+    
+    if (brandKit.usageRules) {
+        prompt += `\n- General Usage Rules: ${brandKit.usageRules}`;
     }
 
     if (brandKit.colors.length > 0) {
@@ -478,18 +488,22 @@ const getBrandKitPrompt = (project: DesignProject): string => {
         const accentColors = brandKit.colors.filter(c => c.role === 'Accent').map(c => c.value);
         
         prompt += `\n- The color palette is strictly defined. You MUST only use these colors.
-          - Main colors (for backgrounds, large areas): ${mainColors.join(', ') || 'none'}.
+          - Main colors (for backgrounds, large areas): ${mainColors.join(', ') || 'none'}. Use these primarily.
           - Sub colors (for secondary elements): ${subColors.join(', ') || 'none'}.
-          - Accent colors (for buttons, highlights, calls to action): ${accentColors.join(', ') || 'none'}.`;
+          - Accent colors (for buttons, highlights, calls to action): ${accentColors.join(', ') || 'none'}. Use these sparingly for emphasis.`;
     }
 
     if (brandKit.fonts.length > 0) {
         const headlineFont = brandKit.fonts.find(f => f.role === 'Headline');
+        const subheadlineFont = brandKit.fonts.find(f => f.role === 'Sub-headline');
         const bodyFont = brandKit.fonts.find(f => f.role === 'Body Text');
         
         prompt += `\n- The typography is strictly defined. You MUST follow these rules:`;
         if (headlineFont) {
             prompt += `\n  - For all main titles and headlines, you MUST use the font "${headlineFont.fontFamily}" with a weight of ${headlineFont.fontWeight}.`;
+        }
+        if (subheadlineFont) {
+            prompt += `\n  - For subtitles and secondary headings, you MUST use the font "${subheadlineFont.fontFamily}" with a weight of ${subheadlineFont.fontWeight}.`;
         }
         if (bodyFont) {
             prompt += `\n  - For all body text and paragraphs, you MUST use the font "${bodyFont.fontFamily}" with a weight of ${bodyFont.fontWeight}.`;
@@ -531,6 +545,8 @@ ${brandPrompt}`;
         [DesignType.VColoring]: basePrompt.replace('{type}', 'vertical mobile screen for a V-Coloring service, focusing on a single strong visual element'),
         [DesignType.MobileBusinessCard]: basePrompt.replace('{type}', 'vertical mobile business card'),
         [DesignType.SeasonalGreeting]: basePrompt.replace('{type}', 'warm seasonal greeting image for mobile message'),
+        [DesignType.ProductBox]: basePrompt.replace('{type}', 'elegant cosmetics product box packaging'),
+        [DesignType.WindowSheeting]: basePrompt.replace('{type}', 'bold and clear window graphic'),
     }
 };
 
@@ -560,12 +576,11 @@ export const generateFullDesignPreviews = async (designType: DesignType, project
     }
 };
 
-const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta'): string => {
+const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta', dieline?: { cutPath: string; creasePath: string; }): string => {
     const designBrief = project.designBrief;
     const dimensions = MATERIAL_DIMENSIONS[type];
     const canvasWidthPx = mmToPx(dimensions.width_mm);
     const canvasHeightPx = mmToPx(dimensions.height_mm);
-    const safetyMarginPx = mmToPx(3);
     const firstBodyLine = designBrief.bodyText.split('\n')[0] || '핵심 내용';
     const brandPrompt = getBrandKitPrompt(project);
     const primaryFont = project.brandKit?.fonts.find(f => f.role === 'Headline')?.fontFamily || designBrief.fontFamily;
@@ -579,9 +594,22 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
             - **Instruction:** Maintain the style, fonts, colors, and overall visual identity of the original design while adapting it to the new '${type}' format. The layer content (text, image assets) should remain the same, but their positions and sizes must be adjusted for the new canvas dimensions.
         `;
     }
+    
+    let dielinePrompt = '';
+    if (dieline) {
+        dielinePrompt = `
+            **Packaging Dieline Rules (CRITICAL):**
+            - This design is for a product box with a specific dieline. You MUST place all content within the safe panels defined by the cut and crease lines.
+            - **Cut Path (Magenta):** This is the outer boundary. No content should extend beyond this path.
+            - **Crease Path (Cyan):** These are fold lines. CRITICAL: Do NOT place any important text or logos directly on or too close to these lines, as they will be folded.
+            - You must analyze the panels created by these lines and place content (like front panel, side panels, top flap) logically. Assume the largest central panel is the front.
+        `;
+    }
 
 
-    const basePrompt = `You are an expert typographer and graphic designer. Your task is to design a professional layout for a ${canvasWidthPx}px by ${canvasHeightPx}px canvas for a '${type}'.
+    const basePrompt = `You are an expert typographer and graphic designer. Your task is to analyze an image of a design and convert it into a structured JSON layout for a ${canvasWidthPx}px by ${canvasHeightPx}px canvas for a '${type}'.
+    
+    **CRITICAL RULE: All coordinate and dimension values (top, left, width, height) MUST be valid numbers within the canvas boundaries. 'left' must be between 0 and ${canvasWidthPx}. 'top' must be between 0 and ${canvasHeightPx}. A layer's right edge (left + width) CANNOT exceed ${canvasWidthPx}. A layer's bottom edge (top + height) CANNOT exceed ${canvasHeightPx}. Do NOT generate nonsensical or out-of-bounds numbers.**
     
     **Layer Naming Rule:** For each layer you create, you MUST provide a short, descriptive 'name' in Korean (e.g., '메인 제목', '로고 이미지', '배경 사각형').
     
@@ -596,11 +624,11 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
     ${JSON.stringify(KOREAN_FONTS_LIST.map(f => ({ name: f.name, weights: f.weights, style: f.style, description: f.description })), null, 2)}
 
     **General Layout Rules:**
-    - Adhere to a ${safetyMarginPx}px safety margin for all critical elements.
     - For every generated layer, you MUST include 'isVisible: true' and 'isLocked: false'.
     - Use text effects ('effect' object) for professional styling, like a subtle shadow or lift.
-    - IMPORTANT: You are analyzing a provided image to create this layout. The positions and styles should match the image.
+    - IMPORTANT: You are analyzing a provided image to create this layout. The positions and styles should match the image with extreme precision.
     ${brandPrompt}
+    ${dielinePrompt}
     ${adaptationPrompt}
     Your output MUST be a JSON object with 'textLayers', 'imageLayers', and 'shapeLayers' arrays, conforming to the schema.`;
 
@@ -673,12 +701,29 @@ const getLayoutPrompt = (type: DesignType, project: DesignProject, originalLayou
             - **Text Layers**: A large, decorative greeting message ("${designBrief.title}"). A smaller sign-off for the sender at the bottom.
             - **Image Layers**: Placeholder for a relevant seasonal image ('main_photo').
             - **Shape Layers**: Use festive decorative elements (e.g., simple snowflakes for winter, floral elements for spring).`;
+        case DesignType.ProductBox: return `${basePrompt}
+            - **Task**: Design a layout for a product box.
+            - **Content**: The product is "${designBrief.title}". Key feature: "${firstBodyLine}".
+            - **Layout Style**: Place the product name, logo, and key feature on the main front panel. Place secondary information like ingredients or instructions on the side panels. The top flap could have the logo or a pattern.`;
+        case DesignType.WindowSheeting: return `${basePrompt}
+            - **Task**: Design a layout for a window graphic.
+            - **Layout Style**: Bold, clear, and readable from a distance. Use very large text and high-contrast colors. Focus on one key message.
+            - **Text Layers**: One main message ("${designBrief.title}") with a very large font size and strong visual weight.
+            - **Image Layers**: A placeholder for a logo ('brand_logo') or a simple, impactful graphic ('main_photo').`;
+        case DesignType.TShirt:
+        case DesignType.EcoBag:
+             const productInfo = `This design will be printed on a ${project.designBrief.colorPalette} ${type}.`;
+             return `${basePrompt}
+             - **Task**: Design a graphic for a ${type}. ${productInfo}
+             - **Layout Style**: The design should be a self-contained graphic. Place text and images together in a visually appealing composition.
+             - **Text Layers**: A main slogan or title ("${designBrief.title}").
+             - **Image Layers**: A main graphic element ('main_photo').`;
         default: return basePrompt;
     }
 }
 
-export const generatePageLayout = async (type: DesignType, project: DesignProject, imageBase64?: string, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta'): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
-    const layout = await generateLayoutFromPrompt(getLayoutPrompt(type, project, originalLayout, pageContext), imageBase64);
+export const generatePageLayout = async (type: DesignType, project: DesignProject, imageBase64?: string, originalLayout?: DesignPage, pageContext?: 'cover' | 'inner' | 'cta', dieline?: { cutPath: string; creasePath: string; }): Promise<Omit<DesignPage, 'id' | 'pairId' | 'base64' | 'type' | 'pageNumber'>> => {
+    const layout = await generateLayoutFromPrompt(getLayoutPrompt(type, project, originalLayout, pageContext, dieline), imageBase64);
     return { textLayers: layout.textLayers, imageLayers: layout.imageLayers, shapeLayers: layout.shapeLayers };
 };
 
@@ -689,7 +734,12 @@ export const convertPreviewToEditableDocument = async (
 ): Promise<DesignDocument> => {
     
     // Step 1: Extract the background from the preview image.
-    const backgroundExtractionPrompt = `Analyze the provided image. Your task is to intelligently remove all text elements, logos, and simple foreground graphic elements, leaving only the main background image. Use inpainting techniques to seamlessly fill the areas where the elements were removed. Return only the final, clean background image. Do not add any text.`;
+    const backgroundExtractionPrompt = `You are a professional photo restoration expert.
+    Analyze the provided image, which contains a design with text, logos, and other graphic elements layered on top of a background.
+    Your task is to meticulously identify ALL foreground elements (text, logos, simple icons, shapes) and completely remove them.
+    Then, intelligently reconstruct the area behind the removed elements using advanced inpainting techniques.
+    The final output MUST be a clean, complete, and seamless background image, with no traces, shadows, or artifacts from the removed elements.
+    Return ONLY the final, clean background image. Do not add any text or other elements.`;
     
     const backgroundResponse = await tmoaStudio.models.generateContent({
         model: 'gemini-2.5-flash-image',

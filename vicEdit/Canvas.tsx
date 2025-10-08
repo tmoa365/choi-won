@@ -320,6 +320,12 @@ export const Canvas: React.FC<CanvasProps> = ({
                     onContextMenu={(e) => handleContextMenu(e, 'canvas')}
                 >
                     <img src={assetUrlMap.get('background_asset')} className="absolute w-full h-full object-cover" />
+                     {page.dieline && (
+                        <svg className="absolute w-full h-full pointer-events-none" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} style={{ zIndex: 100}}>
+                            <path d={page.dieline.cutPath} stroke="magenta" strokeWidth="2" fill="none" />
+                            <path d={page.dieline.creasePath} stroke="cyan" strokeWidth="2" fill="none" strokeDasharray="5,5" />
+                        </svg>
+                    )}
                     {allLayers.map(layer => (
                         <LayerComponent
                             key={layer.id}

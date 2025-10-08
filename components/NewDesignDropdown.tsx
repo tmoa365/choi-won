@@ -25,6 +25,7 @@ export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNe
                 { label: '안내 책자', type: DesignType.Booklet },
                 { label: '초대장', type: DesignType.Invitation },
                 { label: '티켓/입장권', type: DesignType.Ticket },
+                { label: '윈도우 시트지', type: DesignType.WindowSheeting },
             ]
         },
         {
@@ -52,6 +53,7 @@ export const NewDesignDropdown: React.FC<NewDesignDropdownProps> = ({ onCreateNe
                  { label: '제품 태그', type: DesignType.ProductTag },
                  { label: '포장 스티커', type: DesignType.PackagingSticker },
                  { label: '상품권', type: DesignType.GiftCertificate },
+                 { label: '제품 단상자', type: DesignType.ProductBox },
             ]
         },
         {

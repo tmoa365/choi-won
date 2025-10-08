@@ -21,6 +21,44 @@ const TEMPLATE_PROJECT_DEFAULTS: Omit<DesignProject, 'designBrief' | 'documents'
 
 export const TEMPLATES: Template[] = [
     {
+        id: 'cosmetics-box-template',
+        name: '화장품 상자',
+        description: '세럼, 크림 등 화장품 제품을 위한 표준 단상자 템플릿입니다. 칼선이 포함되어 있습니다.',
+        thumbnailUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDIwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+Cgk8cGF0aCBkPSJNNjAuNSA0MC41SDExMS41VjE0NC41SDYwLjVaIiBmaWxsPSIjRThFQUZFIiBzdHJva2U9IiNDQ0NERTUiIHN0cm9rZS13aWR0aD0iMSIvPgoJPHBhdGggZD0iTTExMS41IDQwLjVIMTYyLjVWMTQ0LjVIMTExLjVaIiBmaWxsPSIjRjRGNUY3IiBzdHJva2U9IiNDQ0NERTUiIHN0cm9rZS13aWR0aD0iMSIvPgoJPHBhdGggZD0iTTkuNSA0MC41SDYwLjVWMTQ0LjVIOS41WiIgZmlsbD0iI0Y0RjVGNyIgc3Ryb2tlPSIjQ0NDREU1IiBzdHJva2Utd2lkdGg9IjEiLz4KCTxwYXRoIGQ9Ik02MC41IDEwLjVIMTExLjVWNDAuNUg2MC41WiIgZmlsbD0iI0Y5RjlGQiIgc3Ryb2tlPSIjQ0NDREU1IiBzdHJva2Utd2lkdGg9IjEiLz4KCTxwYXRoIGQ9Ik02MC41IDE0NC41SDExMS41VjE3NC41SDYwLjVaIiBmaWxsPSIjRjlGOUZCIiBzdHJva2U9IiNDQ0NERTUiIHN0cm9rZS13aWR0aD0iMSIvPgoJPHRleHQgeD0iODYiIHk9Ijk1IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzY0NzRERiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q09TTUVUSUNTzwv0ZXh0Pgo8L3N2Zz4=',
+        project: {
+            ...TEMPLATE_PROJECT_DEFAULTS,
+            designBrief: {
+                title: '글로우 세럼',
+                subtitle: 'Glow Serum',
+                bodyText: '비타민 C 유도체 함유\n수분 광채 피부 완성',
+                contactInfo: '용량: 30ml / 1.0 fl.oz.',
+                keywords: ['미니멀', '전문성', '우아함'],
+                colorPalette: '부드러운 파스텔',
+                toneAndManner: '세련되고 미래지향적',
+                fontFamily: 'Noto Sans KR',
+            },
+            documents: [{
+                id: uuidv4(),
+                name: DesignType.ProductBox,
+                pages: [{
+                    id: uuidv4(),
+                    type: DesignType.ProductBox,
+                    base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==',
+                    textLayers: [],
+                    imageLayers: [],
+                    shapeLayers: [],
+                    pageNumber: 1,
+                    width_mm: 157,
+                    height_mm: 157,
+                    dieline: {
+                        cutPath: "M 89 26 L 89 0 L 157 0 L 157 26 L 186 26 L 186 157 L 157 157 L 157 186 L 89 186 L 89 157 L 0 157 L 0 26 L 89 26 Z",
+                        creasePath: "M 89 26 L 157 26 M 89 157 L 157 157 M 89 26 L 89 157 M 157 26 L 157 157"
+                    }
+                }]
+            }]
+        },
+    },
+    {
         id: 'cafe-poster-modern',
         name: '모던 카페 포스터',
         description: '세련된 느낌의 카페 오픈 또는 신메뉴 홍보용 포스터 템플릿입니다.',
@@ -47,67 +85,18 @@ export const TEMPLATES: Template[] = [
                     textLayers: [
                         { id: uuidv4(), content: 'URBAN GRIND', top: 521, left: 147, width: 4202, height: 494, fontSize: 411, fontWeight: 900, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 1, isVisible: true, isLocked: false },
                         { id: uuidv4(), content: 'CAFE', top: 928, left: 147, width: 1421, height: 351, fontSize: 292, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 0.8, isVisible: true, isLocked: false },
-                        { id: uuidv4(), content: 'GRAND OPENING', top: 5880, left: 147, width: 1599, height: 169, fontSize: 141, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, isVisible: true, isLocked: false },
-                        { id: uuidv4(), content: '8월 24일 | 서울시 커피구 향기로운 123', top: 6092, left: 147, width: 2354, height: 106, fontSize: 88, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', color: '#D1D5DB', textAlign: 'left', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, isVisible: true, isLocked: false }
+                        // FIX: Add missing properties to this TextLayer object.
+                        { id: uuidv4(), content: 'GRAND OPENING', top: 5880, left: 147, width: 1599, height: 169, fontSize: 141, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', color: '#FFFFFF', textAlign: 'left', fontFamily: 'Hahmlet', rotation: 0, opacity: 1, isVisible: true, isLocked: false }
                     ],
                     imageLayers: [],
                     shapeLayers: [
-                        { id: uuidv4(), type: 'rectangle', top: 5851, left: 147, width: 4627, height: 8, rotation: 0, fill: '#FFFFFF', strokeColor: '#000000', strokeWidth: 0, opacity: 0.5, isVisible: true, isLocked: false }
+                        { id: uuidv4(), type: 'rectangle', top: 0, left: 0, width: 4961, height: 7016, rotation: 0, fill: '#1E1E1E', strokeColor: '#000000', strokeWidth: 0, opacity: 1, isVisible: true, isLocked: false },
+                        { id: uuidv4(), type: 'line', top: 5693, left: 147, width: 885, height: 2, rotation: 0, fill: '#FFFFFF', strokeColor: '#FFFFFF', strokeWidth: 2, opacity: 1, isVisible: true, isLocked: false }
                     ],
                     pageNumber: 1,
+                    width_mm: 420,
+                    height_mm: 594,
                 }]
-            }]
-        },
-    },
-    {
-        id: 'corp-bizcard-clean',
-        name: '기업용 명함',
-        description: '어떤 비즈니스에도 어울리는 깔끔하고 전문적인 명함 템플릿입니다.',
-        thumbnailUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAABAKADAAQAAAABAAABAAAAAABQTL3AAAAATUlEQVR4Ae3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8A8GAAGv9pA+AAAAAElFTkSuQmCC',
-        project: {
-            ...TEMPLATE_PROJECT_DEFAULTS,
-            designBrief: {
-                title: 'Alex Kim',
-                subtitle: 'Lead Developer',
-                bodyText: 'Creative software solutions for the modern web.',
-                contactInfo: 'Tel: 010-1234-5678\nEmail: alex.k@example.com\nWeb: www.alexkim.dev',
-                keywords: ['전문성', '모던', '미니멀'],
-                colorPalette: '신뢰의 파랑',
-                toneAndManner: '진중하고 신뢰감',
-                fontFamily: 'Noto Sans KR',
-            },
-            documents: [{
-                id: uuidv4(),
-                name: DesignType.BusinessCardFront,
-                pages: [
-                    {
-                        id: uuidv4(), type: DesignType.BusinessCardFront, pageNumber: 1, pairId: 'bizcard-1',
-                        base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==',
-                        textLayers: [
-                            { id: uuidv4(), content: 'Alex Kim', top: 165, left: 354, width: 620, height: 97, fontSize: 81, fontWeight: 900, color: '#111827', textAlign: 'right', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, fontStyle: 'normal', textDecoration: 'none', isVisible: true, isLocked: false },
-                            { id: uuidv4(), content: 'Lead Developer', top: 270, left: 354, width: 620, height: 43, fontSize: 36, fontWeight: 400, color: '#4B5563', textAlign: 'right', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, fontStyle: 'normal', textDecoration: 'none', isVisible: true, isLocked: false }
-                        ],
-                        imageLayers: [
-                            { id: uuidv4(), assetId: 'logo_photo', top: 184, left: 63, width: 177, height: 118, rotation: 0, opacity: 1, isVisible: true, isLocked: false }
-                        ],
-                        shapeLayers: [
-                            { id: uuidv4(), type: 'rectangle', top: 0, left: 0, width: 319, height: 591, rotation: 0, fill: '#3B82F6', strokeColor: '#000000', strokeWidth: 0, opacity: 1, isVisible: true, isLocked: false }
-                        ]
-                    },
-                    {
-                        id: uuidv4(), type: DesignType.BusinessCardBack, pageNumber: 2, pairId: 'bizcard-1',
-                        base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAwAB/epv2AAAAABJRU5ErkJggg==',
-                        textLayers: [
-                            { id: uuidv4(), content: 'T: 010-1234-5678', top: 224, left: 59, width: 917, height: 43, fontSize: 36, fontWeight: 400, color: '#4B5563', textAlign: 'left', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, fontStyle: 'normal', textDecoration: 'none', isVisible: true, isLocked: false },
-                            { id: uuidv4(), content: 'E: alex.k@example.com', top: 283, left: 59, width: 917, height: 43, fontSize: 36, fontWeight: 400, color: '#4B5563', textAlign: 'left', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, fontStyle: 'normal', textDecoration: 'none', isVisible: true, isLocked: false },
-                            { id: uuidv4(), content: 'W: www.alexkim.dev', top: 342, left: 59, width: 917, height: 43, fontSize: 36, fontWeight: 400, color: '#4B5563', textAlign: 'left', fontFamily: 'Noto Sans KR', rotation: 0, opacity: 1, fontStyle: 'normal', textDecoration: 'none', isVisible: true, isLocked: false }
-                        ],
-                        imageLayers: [],
-                        shapeLayers: [
-                             { id: uuidv4(), type: 'rectangle', top: 59, left: 59, width: 945, height: 6, rotation: 0, fill: '#3B82F6', strokeColor: '#000000', strokeWidth: 0, opacity: 1, isVisible: true, isLocked: false }
-                        ]
-                    }
-                ]
             }]
         }
     }

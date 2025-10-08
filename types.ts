@@ -27,6 +27,9 @@ export enum DesignType {
   EcoBag = '에코백',
   Cap = '모자',
   Pouch = '파우치',
+  // Stage 3 Additions
+  ProductBox = '제품 단상자',
+  WindowSheeting = '윈도우 시트지',
 }
 
 export type GenerationOption = DesignType | 'BusinessCardSet';
@@ -146,7 +149,12 @@ export interface DesignPage {
   vGuides?: number[];
   mockup?: {
     color: string;
-  }
+  };
+  dieline?: {
+    cutPath: string;
+    creasePath: string;
+  };
+  attachmentDirection?: 'inside' | 'outside';
 }
 
 export interface DesignDocument {
@@ -188,6 +196,9 @@ export interface BrandKit {
   logos: BrandLogo[];
   colors: BrandColor[];
   fonts: BrandFont[];
+  logoClearspace?: number; // As a percentage of logo width
+  logoMinimumSize?: number; // In pixels
+  usageRules?: string; // Text-based rules
 }
 
 export type DataMapping = { [layerId: string]: string }; // key: layerId, value: column header

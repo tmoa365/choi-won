@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, ChangeEvent, useMemo } from 'react';
-import { DesignBrief, DesignDocument, DesignProject, DesignType, GenerationOption } from '../types';
+import { DesignBrief, DesignDocument, DesignProject, DesignType, GenerationOption, DesignPage } from '../types';
 import { Modal, Button, Textarea, Input, Select, Label } from './ui';
 import { SpinnerIcon, SparklesIcon, CheckCircleIcon } from './icons';
 import { expandBriefFromIdea, generateFullDesignPreviews, convertPreviewToEditableDocument } from '../services/geminiService';
@@ -114,7 +114,20 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
         try {
             const tempProjectData = { ...projectData, designBrief: brief };
             const newDocument = await convertPreviewToEditableDocument(selectedBase64, designType, tempProjectData);
-            onDesignCreated(newDocument, brief);
+            
+            // Add mockup/dieline info to the created document's pages
+            const finalPages = newDocument.pages.map(p => {
+                let pageUpdates: Partial<DesignPage> = {};
+                if ([DesignType.TShirt, DesignType.EcoBag, DesignType.Cap, DesignType.Pouch].includes(p.type as DesignType)) {
+                    pageUpdates.mockup = { color: contextInfo.product_color || '흰색' };
+                }
+                 if (p.type === DesignType.WindowSheeting) {
+                    pageUpdates.attachmentDirection = (contextInfo.attachment_direction as 'inside' | 'outside') || 'outside';
+                }
+                return {...p, ...pageUpdates};
+            });
+
+            onDesignCreated({...newDocument, pages: finalPages}, brief);
         } catch (err) {
             setError(getApiErrorMessage(err, '디자인 변환'));
             setStep('selectingPreview');
@@ -183,6 +196,11 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
                     <div><Label>제품명</Label><Input name="product_name" onChange={handleContextChange}/></div>
                     <div><Label>가격</Label><Input name="price" onChange={handleContextChange}/></div>
                 </div>);
+            case DesignType.ProductBox:
+                return (<div className="space-y-4">
+                    <div><Label>제품명</Label><Input name="product_name" onChange={handleContextChange} placeholder="예: 글로우 세럼"/></div>
+                    <div><Label>핵심 특징</Label><Input name="product_feature" onChange={handleContextChange} placeholder="예: 비타민 C 함유, 수분 광채"/></div>
+                </div>);
             case DesignType.TShirt:
             case DesignType.EcoBag:
             case DesignType.Cap:
@@ -191,6 +209,16 @@ export const GenerationWizardModal: React.FC<GenerationWizardModalProps> = ({
                     <div><Label>그래픽 컨셉</Label><Input name="graphic_concept" onChange={handleContextChange} placeholder="예: 파도타는 고양이 일러스트"/></div>
                     <div><Label>제품 색상</Label><Select name="product_color" onChange={handleContextChange}><option>흰색</option><option>검정색</option><option>회색</option><option>네이비</option></Select></div>
                     {baseDesignType === DesignType.TShirt && <div><Label>인쇄 위치</Label><Select name="print_location" onChange={handleContextChange}><option>앞면 중앙</option><option>왼쪽 가슴</option><option>등판 중앙</option></Select></div>}
+                </div>);
+            case DesignType.WindowSheeting:
+                 return (<div className="space-y-4">
+                    <div><Label>부착 방식</Label>
+                        <Select name="attachment_direction" onChange={handleContextChange}>
+                            <option value="outside">외부 부착 (일반)</option>
+                            <option value="inside">내부 부착 (반전 인쇄)</option>
+                        </Select>
+                        <p className="text-xs text-slate-500 mt-1">'내부 부착' 선택 시, 밖에서 보이도록 안쪽에 붙이며 최종 결과물은 좌우 반전되어 생성됩니다.</p>
+                    </div>
                 </div>);
             default:
                 return <p>이 디자인 유형에는 추가 정보가 필요하지 않습니다.</p>;
